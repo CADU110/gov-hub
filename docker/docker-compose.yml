@@ -128,7 +128,7 @@ services:
 
   # Landing zone (object storage) — ver ADR-0012
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     ports:
       - "${MINIO_HOST_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
@@ -147,7 +147,7 @@ services:
 
   # Creates the landing zone bucket on first start
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
       minio:
         condition: service_healthy

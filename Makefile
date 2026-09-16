@@ -1,6 +1,6 @@
 export PYTHONPATH := $(CURDIR)/airflow:$(CURDIR)/airflow/helpers:$(CURDIR)/airflow/plugins
 
-COMPOSE ?= docker compose -f docker/docker-compose.yml
+COMPOSE ?= docker compose --env-file .env -f docker/docker-compose.yml
 
 AIRFLOW_SERVICE ?= airflow
 AIRFLOW_LOCAL_DB_HOST ?= postgres
@@ -98,7 +98,7 @@ acesso:
 # no framework precisa dele.
 superset:
 	@if [ ! -f .env ]; then cp local.env .env; echo ".env criado a partir de local.env"; fi
-	$(COMPOSE) --env-file .env --profile bi up -d superset
+	$(COMPOSE) --profile bi up -d superset
 	@$(COMPOSE) exec -T $(AIRFLOW_SERVICE) sh -c "printf '%s\n' '{\"superset_default\":{\"conn_type\":\"http\",\"host\":\"superset\",\"schema\":\"http\",\"port\":8088,\"login\":\"$(SUPERSET_ADMIN_USER)\",\"password\":\"$(SUPERSET_ADMIN_PASSWORD)\"}}' > /tmp/superset-connections.json && airflow connections import --overwrite /tmp/superset-connections.json && rm -f /tmp/superset-connections.json" \
 		|| echo "Airflow não está em execução: crie a connection 'superset_default' antes de rodar a DAG de publicação."
 	@echo "Superset em http://localhost:8088 (usuário e senha em local.env)."
@@ -111,9 +111,9 @@ test:
 # quem precisou remapear para conviver com outro projeto.
 test-integration:
 	@if [ ! -f .env ]; then cp local.env .env; echo ".env created from local.env"; fi
-	@$(COMPOSE) --env-file .env up -d minio minio-init postgres
+	@$(COMPOSE) up -d minio minio-init postgres
 	@echo "Waiting for services to be healthy..."
-	@$(COMPOSE) --env-file .env ps
+	@$(COMPOSE) ps
 	@set -a; . ./.env; set +a; \
 		POSTGRES_HOST=localhost \
 		POSTGRES_PORT=$${POSTGRES_HOST_PORT:-5432} \
@@ -123,7 +123,7 @@ test-integration:
 compose:
 	@echo "Iniciando ambiente local do Airflow com Docker Compose..."
 	@if [ ! -f .env ]; then cp local.env .env; echo ".env criado a partir de local.env"; fi
-	$(COMPOSE) --env-file .env up -d --build
+	$(COMPOSE) up -d --build
 	$(MAKE) dev
 	$(MAKE) dev-check
 
