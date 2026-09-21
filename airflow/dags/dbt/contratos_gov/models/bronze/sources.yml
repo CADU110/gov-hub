@@ -1,0 +1,198 @@
+# GERADO por `make modelo` a partir de catalogo/sistemas/contratos_gov.yml — não edite à mão.
+#
+# A Bronze não é materializada por dbt: ela é um source sobre a zona raw,
+# onde a ingestão entrega o dado (ADR-0006, ADR-0017, ADR-0021).
+#
+# Esta é a forma de tabela, do backend `warehouse`. Em um deployment com a
+# raw em object storage, o source aponta para os arquivos da entidade.
+
+version: 2
+
+sources:
+  - name: contratos_gov
+    schema: contratos_gov
+    description: >
+      Camada Bronze de Contratos.gov.br (Comprasnet Contratos): dado fiel à fonte,
+      gravado pelas DAGs de ingestão. Sistema estruturante de gestão dos contratos
+      firmados a partir das compras públicas federais. Expõe API pública de
+      consulta a contratos por unidade gestora e, por contrato, aos seus
+      sub-recursos: vigência e aditivos, itens, empenhos, faturas, cronograma,
+      publicações, garantias, arquivos e fiscais.
+    meta:
+      owner: "@GovHub-br/oss"
+      sistema_origem: contratos_gov
+      camada: bronze
+    tables:
+      - name: contrato_arquivo
+        identifier: raw_contrato_arquivo
+        description: >
+            Metadados dos arquivos anexados ao contrato. Só o registro: o conteúdo do
+            arquivo não é ingerido. Granularidade: uma linha por arquivo anexado a um
+            contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_arquivo_ingest_dag
+
+      - name: contrato_ativo
+        identifier: raw_contrato_ativo
+        description: >
+            Cabeçalho dos contratos ativos de uma unidade gestora. Ativo é status de
+            cadastro, não de vigência: em uma UG da amostra, 91 de 92 contratos "ativos"
+            já tinham vigência encerrada. Quem precisa de contrato vigente filtra por
+            vigencia_fim, não por situacao. Granularidade: uma linha por contrato ativo.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_ativo_ingest_dag
+
+      - name: contrato_cronograma
+        identifier: raw_contrato_cronograma
+        description: >
+            Cronograma físico-financeiro do contrato, por mês e ano de referência.
+            Granularidade: uma linha por parcela do cronograma de um contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_cronograma_ingest_dag
+
+      - name: contrato_despesa_acessoria
+        identifier: raw_contrato_despesa_acessoria
+        description: >
+            Despesas acessórias vinculadas ao contrato. Granularidade: uma linha por
+            despesa acessória de um contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_despesa_acessoria_ingest_dag
+
+      - name: contrato_domicilio_bancario
+        identifier: raw_contrato_domicilio_bancario
+        description: >
+            Domicílio bancário do contrato — banco, agência e conta do pagamento.
+            Granularidade: uma linha por domicílio bancário de um contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_domicilio_bancario_ingest_dag
+
+      - name: contrato_empenho
+        identifier: raw_contrato_empenho
+        description: >
+            Empenhos vinculados ao contrato, com o dado orçamentário da despesa.
+            Granularidade: uma linha por empenho vinculado a um contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_empenho_ingest_dag
+
+      - name: contrato_fatura
+        identifier: raw_contrato_fatura
+        description: >
+            Faturas emitidas contra o contrato, com valores e datas de pagamento.
+            Granularidade: uma linha por fatura de um contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_fatura_ingest_dag
+
+      - name: contrato_garantia
+        identifier: raw_contrato_garantia
+        description: >
+            Garantias contratuais prestadas pelo fornecedor, com tipo e valor.
+            Granularidade: uma linha por garantia de um contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_garantia_ingest_dag
+
+      - name: contrato_historico
+        identifier: raw_contrato_historico
+        description: >
+            Histórico de alterações do contrato — o contrato original e cada termo
+            aditivo, de apostilamento ou de rescisão. É o único recurso da API aberta
+            com carimbo de alteração (alterado_em), a uma chamada por contrato.
+            Granularidade: uma linha por evento do histórico de um contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_historico_ingest_dag
+
+      - name: contrato_inativo
+        identifier: raw_contrato_inativo
+        description: >
+            Cabeçalho dos contratos inativos de uma unidade gestora, com o mesmo formato
+            do contrato ativo mais a justificativa de inativação. É entidade raw
+            separada porque é endpoint separado; a Silver unifica as duas.
+            Granularidade: uma linha por contrato inativo.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_inativo_ingest_dag
+
+      - name: contrato_item
+        identifier: raw_contrato_item
+        description: >
+            Itens contratados — material ou serviço, com quantidade e valor unitário.
+            Granularidade: uma linha por item de um contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_item_ingest_dag
+
+      - name: contrato_ocorrencia
+        identifier: raw_contrato_ocorrencia
+        description: >
+            Ocorrências registradas na execução do contrato. Granularidade: uma linha
+            por ocorrência registrada em um contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_ocorrencia_ingest_dag
+
+      - name: contrato_preposto
+        identifier: raw_contrato_preposto
+        description: >
+            Prepostos indicados pelo fornecedor para o contrato. A origem entrega nome
+            completo, e-mail e telefone de pessoa física. Granularidade: uma linha por
+            preposto indicado para um contrato.
+        meta:
+          classificacao: pessoal
+          dag_ingestao: contrato_preposto_ingest_dag
+
+      - name: contrato_publicacao
+        identifier: raw_contrato_publicacao
+        description: >
+            Publicações do contrato no Diário Oficial da União, com texto e link.
+            Granularidade: uma linha por publicação vinculada a um contrato.
+        meta:
+          classificacao: publico
+          dag_ingestao: contrato_publicacao_ingest_dag
+
+      - name: contrato_responsavel
+        identifier: raw_contrato_responsavel
+        description: >
+            Fiscais e gestores designados para o contrato. A origem entrega nome
+            completo, e-mail e telefone de pessoa física. Granularidade: uma linha por
+            responsável designado para um contrato.
+        meta:
+          classificacao: pessoal
+          dag_ingestao: contrato_responsavel_ingest_dag
+
+      - name: contrato_terceirizado
+        identifier: raw_contrato_terceirizado
+        description: >
+            Trabalhadores terceirizados alocados no contrato. Entidade de dado pessoal
+            por natureza, ainda que tenha vindo vazia em toda a amostra. Granularidade:
+            uma linha por trabalhador terceirizado alocado em um contrato.
+        meta:
+          classificacao: pessoal
+          dag_ingestao: contrato_terceirizado_ingest_dag
+
+      - name: orgao_contratante
+        identifier: raw_orgao_contratante
+        description: >
+            Órgãos com contrato registrado no Contratos.gov.br. Enumeração pura: a
+            origem devolve apenas o código, sem nome nem hierarquia. Granularidade: um
+            registro por código de órgão.
+        meta:
+          classificacao: publico
+          dag_ingestao: orgao_contratante_ingest_dag
+
+      - name: unidade_contratante
+        identifier: raw_unidade_contratante
+        description: >
+            Unidades gestoras com contrato registrado no Contratos.gov.br. Enumeração
+            pura, só o código. É a lista que dirige a varredura de cabeçalhos por UG.
+            Granularidade: um registro por código de unidade gestora.
+        meta:
+          classificacao: publico
+          dag_ingestao: unidade_contratante_ingest_dag

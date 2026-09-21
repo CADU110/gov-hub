@@ -67,6 +67,7 @@ de relatório).
 | Módulo | O que faz |
 |---|---|
 | `cliente_base.py` | Cliente HTTP base (`httpx`) com retry e backoff exponencial |
+| `cliente_contratos_gov.py` | API aberta do Contratos.gov.br: achata o cabeçalho do contrato e injeta `contrato_id` nos sub-recursos |
 | `cliente_postgres.py` | Cliente PostgreSQL: criação de tabela por inferência de tipos, upsert, deduplicação |
 | `cliente_sqlserver.py` | Leitura de tabelas SQL Server via `MsSqlHook` |
 | `cliente_storage.py` | Abstração `fsspec` da landing zone (`STORAGE_BACKEND`: `minio`/`s3`/`adls`) |
@@ -90,6 +91,22 @@ de relatório).
 
 Convenção da landing zone:
 `{bucket}/{source}/{entity}/{ano}/{mes}/{dia}/{run_id}.parquet`
+
+## Sistemas estruturantes
+
+Cada sistema é catalogado em [`catalogo/sistemas/`](catalogo/README.md), que é a
+fonte de verdade sobre suas entidades e sobre por quais chaves elas se cruzam.
+`ingerido` significa que há DAG de ingestão neste repositório; `planejado`, que o
+sistema está catalogado para o roadmap.
+
+| Sistema | Órgão gestor | Entidades | Status |
+|---|---|---|---|
+| [`compras_gov`](catalogo/sistemas/compras_gov.yml) — Compras.gov.br (SIASG) | MGI | 8 | ingerido |
+| [`contratos_gov`](catalogo/sistemas/contratos_gov.yml) — Contratos.gov.br | MGI | 18 | planejado |
+
+Decisões operacionais da ingestão do `contratos_gov` — concorrência medida,
+horários e escopo de detalhamento — em
+[`docs/notas/contratos-gov-ingestao.md`](docs/notas/contratos-gov-ingestao.md).
 
 ## Modelagem e cruzamento entre sistemas
 

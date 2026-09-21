@@ -1,0 +1,308 @@
+# Contratos.gov.br (Comprasnet Contratos) — catálogo de entidades e chaves de
+# cruzamento. Ver catalogo/README.md e ADR-0017.
+#
+# Escopo: os 20 endpoints ABERTOS da API (sem login), que produzem as 18
+# entidades abaixo. Os 18 endpoints que filtram por período (dt_alteracao_min/
+# max, em /api/v1/* e /api/v2/*) exigem JWT de usuário e ficam fora — é o que
+# impede a carga incremental e obriga a varredura full por UG.
+#
+# As entidades ainda não têm DAG: cada uma é uma issue filha da feature #15, e
+# `status` vira `ingerido` quando a última fechar. `origem_atual` já aponta para
+# onde `write_raw` vai gravar (backend `warehouse`, ADR-0021), porque é disso
+# que o `sources.yml` da Bronze é gerado.
+#
+# Forma dos dados, levantada contra a API em 2026-09-21:
+#   - resposta sempre em lista, sem paginação e sem filtro por período;
+#   - valores monetários como string pt-BR ("58.314,00");
+#   - o cabeçalho do contrato vem com objetos aninhados (contratante.orgao...,
+#     fornecedor...), achatados por cliente_contratos_gov antes do write_raw —
+#     por isso as colunas de chave abaixo são os nomes já achatados;
+#   - sub-recurso não traz contrato_id de forma confiável (publicacoes traz
+#     contratohistorico_id, empenhos não traz nenhum dos dois), então o cliente
+#     injeta contrato_id a partir da URL da chamada.
+
+sistema: contratos_gov
+nome: Contratos.gov.br (Comprasnet Contratos)
+descricao: >-
+  Sistema estruturante de gestão dos contratos firmados a partir das compras
+  públicas federais. Expõe API pública de consulta a contratos por unidade
+  gestora e, por contrato, aos seus sub-recursos: vigência e aditivos, itens,
+  empenhos, faturas, cronograma, publicações, garantias, arquivos e fiscais.
+orgao_gestor: mgi
+owner: "@GovHub-br/oss"
+status: planejado
+
+entidades:
+
+  orgao_contratante:
+    descricao: >-
+      Órgãos com contrato registrado no Contratos.gov.br. Enumeração pura: a
+      origem devolve apenas o código, sem nome nem hierarquia.
+    granularidade: um registro por código de órgão
+    dominio: organizacional
+    dag: orgao_contratante_ingest_dag
+    origem_atual: contratos_gov.raw_orgao_contratante
+    chave_primaria: [codigo]
+    classificacao: publico
+    chaves:
+      - chave: co_orgao
+        coluna: codigo
+        verificado: true
+        observacao: >-
+          Confirmado contra a API: 599 códigos de 5 dígitos, no mesmo formato do
+          co_orgao do compras_gov.
+
+  unidade_contratante:
+    descricao: >-
+      Unidades gestoras com contrato registrado no Contratos.gov.br. Enumeração
+      pura, só o código. É a lista que dirige a varredura de cabeçalhos por UG.
+    granularidade: um registro por código de unidade gestora
+    dominio: organizacional
+    dag: unidade_contratante_ingest_dag
+    origem_atual: contratos_gov.raw_unidade_contratante
+    chave_primaria: [codigo]
+    classificacao: publico
+    chaves:
+      - chave: co_uasg
+        coluna: codigo
+        verificado: false
+        observacao: >-
+          A unidade gestora do Contratos.gov.br tem o mesmo formato de 6 dígitos
+          da UASG do compras_gov, mas a equivalência é hipótese até alguém
+          cruzar as duas listas contra o dado ingerido. Enquanto não for
+          conferida, o mapa e o CI sinalizam o mapeamento como não verificado.
+
+  contrato_ativo:
+    descricao: >-
+      Cabeçalho dos contratos ativos de uma unidade gestora. Ativo é status de
+      cadastro, não de vigência: em uma UG da amostra, 91 de 92 contratos
+      "ativos" já tinham vigência encerrada. Quem precisa de contrato vigente
+      filtra por vigencia_fim, não por situacao.
+    granularidade: uma linha por contrato ativo
+    dominio: contratacoes
+    dag: contrato_ativo_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_ativo
+    chave_primaria: [id]
+    classificacao: publico
+    chaves:
+      - chave: co_orgao
+        coluna: orgao_codigo
+        verificado: true
+      - chave: co_uasg
+        coluna: unidade_gestora_codigo
+        verificado: false
+        observacao: >-
+          Mesma ressalva de unidade_contratante.co_uasg.
+      - chave: nu_ni
+        coluna: fornecedor_ni
+        verificado: true
+        observacao: >-
+          A origem entrega o documento com máscara ("09.132.659/0001-76"), e é
+          CNPJ ou CPF conforme fornecedor_tipo. A normalização `digitos` da
+          chave remove a máscara, e as pontes nu_ni → nu_cnpj / nu_cpf resolvem
+          o tipo por comprimento (ADR-0017).
+
+  contrato_inativo:
+    descricao: >-
+      Cabeçalho dos contratos inativos de uma unidade gestora, com o mesmo
+      formato do contrato ativo mais a justificativa de inativação. É entidade
+      raw separada porque é endpoint separado; a Silver unifica as duas.
+    granularidade: uma linha por contrato inativo
+    dominio: contratacoes
+    dag: contrato_inativo_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_inativo
+    chave_primaria: [id]
+    classificacao: publico
+    chaves:
+      - chave: co_orgao
+        coluna: orgao_codigo
+        verificado: true
+      - chave: co_uasg
+        coluna: unidade_gestora_codigo
+        verificado: false
+        observacao: >-
+          Mesma ressalva de unidade_contratante.co_uasg.
+      - chave: nu_ni
+        coluna: fornecedor_ni
+        verificado: true
+        observacao: >-
+          Mesma ressalva de contrato_ativo.fornecedor_ni.
+
+  contrato_historico:
+    descricao: >-
+      Histórico de alterações do contrato — o contrato original e cada termo
+      aditivo, de apostilamento ou de rescisão. É o único recurso da API aberta
+      com carimbo de alteração (alterado_em), a uma chamada por contrato.
+    granularidade: uma linha por evento do histórico de um contrato
+    dominio: contratacoes
+    dag: contrato_historico_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_historico
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+
+  contrato_item:
+    descricao: >-
+      Itens contratados — material ou serviço, com quantidade e valor unitário.
+    granularidade: uma linha por item de um contrato
+    dominio: contratacoes
+    dag: contrato_item_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_item
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+    # catmatseritem_id liga o item ao catálogo de material/serviço do
+    # compras_gov e é candidata natural a chave conformada. Não foi declarada
+    # como tal porque hoje nenhum outro sistema catalogado a expõe, e ADR-0017
+    # define chave conformada como identificador comum a mais de um sistema.
+    # Quando o catálogo de material/serviço do compras_gov for catalogado, este
+    # é o par a declarar.
+
+  contrato_empenho:
+    descricao: >-
+      Empenhos vinculados ao contrato, com o dado orçamentário da despesa.
+    granularidade: uma linha por empenho vinculado a um contrato
+    dominio: contratacoes
+    dag: contrato_empenho_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_empenho
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+    # O payload não traz contrato_id: ele é injetado pelo cliente a partir da
+    # URL da chamada, sem o que não haveria como ligar o empenho ao contrato.
+
+  contrato_fatura:
+    descricao: >-
+      Faturas emitidas contra o contrato, com valores e datas de pagamento.
+    granularidade: uma linha por fatura de um contrato
+    dominio: contratacoes
+    dag: contrato_fatura_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_fatura
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+
+  contrato_cronograma:
+    descricao: >-
+      Cronograma físico-financeiro do contrato, por mês e ano de referência.
+    granularidade: uma linha por parcela do cronograma de um contrato
+    dominio: contratacoes
+    dag: contrato_cronograma_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_cronograma
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+
+  contrato_publicacao:
+    descricao: >-
+      Publicações do contrato no Diário Oficial da União, com texto e link.
+    granularidade: uma linha por publicação vinculada a um contrato
+    dominio: contratacoes
+    dag: contrato_publicacao_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_publicacao
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+    # O payload traz contratohistorico_id, não contrato_id — a publicação
+    # pertence a um evento do histórico, não ao contrato diretamente. O
+    # contrato_id é injetado pelo cliente a partir da URL.
+
+  contrato_garantia:
+    descricao: >-
+      Garantias contratuais prestadas pelo fornecedor, com tipo e valor.
+    granularidade: uma linha por garantia de um contrato
+    dominio: contratacoes
+    dag: contrato_garantia_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_garantia
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+
+  contrato_arquivo:
+    descricao: >-
+      Metadados dos arquivos anexados ao contrato. Só o registro: o conteúdo do
+      arquivo não é ingerido.
+    granularidade: uma linha por arquivo anexado a um contrato
+    dominio: contratacoes
+    dag: contrato_arquivo_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_arquivo
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+
+  contrato_responsavel:
+    descricao: >-
+      Fiscais e gestores designados para o contrato. A origem entrega nome
+      completo, e-mail e telefone de pessoa física.
+    granularidade: uma linha por responsável designado para um contrato
+    dominio: contratacoes
+    dag: contrato_responsavel_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_responsavel
+    chave_primaria: [id]
+    classificacao: pessoal
+    chaves: []
+
+  contrato_preposto:
+    descricao: >-
+      Prepostos indicados pelo fornecedor para o contrato. A origem entrega nome
+      completo, e-mail e telefone de pessoa física.
+    granularidade: uma linha por preposto indicado para um contrato
+    dominio: contratacoes
+    dag: contrato_preposto_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_preposto
+    chave_primaria: [id]
+    classificacao: pessoal
+    chaves: []
+
+  contrato_terceirizado:
+    descricao: >-
+      Trabalhadores terceirizados alocados no contrato. Entidade de dado
+      pessoal por natureza, ainda que tenha vindo vazia em toda a amostra.
+    granularidade: uma linha por trabalhador terceirizado alocado em um contrato
+    dominio: contratacoes
+    dag: contrato_terceirizado_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_terceirizado
+    chave_primaria: [id]
+    classificacao: pessoal
+    chaves: []
+    # Fase 4: veio vazia em toda a amostra do levantamento, então a estrutura
+    # real não foi observada e a chave primária [id] é hipótese, pelo padrão dos
+    # demais sub-recursos. Confirmar ao implementar a DAG.
+
+  contrato_despesa_acessoria:
+    descricao: >-
+      Despesas acessórias vinculadas ao contrato.
+    granularidade: uma linha por despesa acessória de um contrato
+    dominio: contratacoes
+    dag: contrato_despesa_acessoria_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_despesa_acessoria
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+    # Fase 4: mesma ressalva de contrato_terceirizado — estrutura não observada.
+
+  contrato_ocorrencia:
+    descricao: >-
+      Ocorrências registradas na execução do contrato.
+    granularidade: uma linha por ocorrência registrada em um contrato
+    dominio: contratacoes
+    dag: contrato_ocorrencia_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_ocorrencia
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+    # Fase 4: mesma ressalva de contrato_terceirizado — estrutura não observada.
+
+  contrato_domicilio_bancario:
+    descricao: >-
+      Domicílio bancário do contrato — banco, agência e conta do pagamento.
+    granularidade: uma linha por domicílio bancário de um contrato
+    dominio: contratacoes
+    dag: contrato_domicilio_bancario_ingest_dag
+    origem_atual: contratos_gov.raw_contrato_domicilio_bancario
+    chave_primaria: [id]
+    classificacao: publico
+    chaves: []
+    # Fase 4: mesma ressalva de contrato_terceirizado — estrutura não observada.
+    # É também o único recurso que responde 404 {"error"} em vez de 200 [] quando
+    # não há dado; cliente_contratos_gov traduz esse 404 para lista vazia.

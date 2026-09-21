@@ -35,6 +35,13 @@
 # Decisões de arquitetura
 /docs/adr/                      @GovHub-br/oss
 
+# Sistemas estruturantes — código compartilhado entre órgãos, portanto do
+# framework. Já cairia no default `*`; as linhas são explícitas para que
+# continuem valendo quando as regras de órgão abaixo forem descomentadas (a
+# última regra que casa é a que vale).
+/airflow/dags/data_ingest/contratos_gov/   @GovHub-br/oss
+/airflow/dags/dbt/contratos_gov/           @GovHub-br/oss
+
 # ---------------------------------------------------------------------------
 # Pastas de órgão — descomente/adicione conforme os projetos forem migrados.
 # Uma linha por pasta de órgão, sempre DEPOIS das regras compartilhadas

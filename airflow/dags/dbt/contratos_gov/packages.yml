@@ -1,0 +1,7 @@
+# O caminho do pacote base é sobrescrevível por variável de ambiente porque o
+# Cosmos renderiza o projeto dbt em um diretório temporário para montar o grafo
+# da DAG de transformação (ADR-0018) — e de lá um `../gov_bricks` apontaria para
+# fora do monorepo. O default `..` mantém `dbt deps` funcionando normalmente
+# quando rodado dentro da pasta do pacote.
+packages:
+  - local: "{{ env_var('GOV_BRICKS_DBT_DIR', '..') }}/gov_bricks"

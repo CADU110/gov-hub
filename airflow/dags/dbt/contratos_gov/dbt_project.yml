@@ -1,0 +1,28 @@
+# Pacote dbt do sistema estruturante Contratos.gov.br (Comprasnet Contratos).
+# Modelos compartilhados entre órgãos — ver ADR-0004 e ADR-0009.
+#
+# Bronze não é modelada aqui: é materializada pelas DAGs de ingestão e
+# declarada como source em models/bronze/sources.yml (ADR-0017).
+#
+# Ainda sem Silver: a fundação (issue #15) entrega só a Bronze declarada; os
+# modelos chegam quando as entidades estiverem de fato na raw.
+
+name: "contratos_gov"
+version: "0.1.0"
+config-version: 2
+
+profile: "gov_bricks"
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+snapshot-paths: ["snapshots"]
+test-paths: ["tests"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  contratos_gov:
+    silver:
+      +materialized: table
