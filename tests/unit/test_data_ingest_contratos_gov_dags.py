@@ -25,6 +25,7 @@ DAGS_FOLDER = (
 )
 
 TAG_FORMAT = re.compile(r"^[a-z_]+:[a-z0-9_]+$")
+TAGS_OBRIGATORIAS = {"sistema:contratos_gov", "dominio:contratacoes"}
 
 
 @pytest.fixture(scope="module")
@@ -60,13 +61,13 @@ class TestContratosGovDagsIntegrity:
                 violations[dag_id] = bad_tags
         assert not violations, f"Tags fora do formato dimensao:valor: {violations}"
 
-    def test_all_dags_have_sistema_tag(self, dagbag: DagBag) -> None:
-        missing = [
-            dag_id
+    def test_all_dags_have_required_tags(self, dagbag: DagBag) -> None:
+        missing = {
+            dag_id: sorted(TAGS_OBRIGATORIAS - set(dag.tags))
             for dag_id, dag in dagbag.dags.items()
-            if "sistema:contratos_gov" not in dag.tags
-        ]
-        assert not missing, f"DAGs sem a tag sistema:contratos_gov: {missing}"
+            if not TAGS_OBRIGATORIAS.issubset(dag.tags)
+        }
+        assert not missing, f"DAGs sem tags obrigatórias: {missing}"
 
     def test_all_dags_have_owner(self, dagbag: DagBag) -> None:
         missing = [
@@ -75,3 +76,90 @@ class TestContratosGovDagsIntegrity:
             if not dag.default_args.get("owner")
         ]
         assert not missing, f"DAGs sem owner em default_args: {missing}"
+
+
+def test_empty_response_fails_before_write(
+    dagbag: DagBag, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetch_and_store = (
+        dagbag.dags["orgao_contratante_ingest_dag"]
+        .get_task("fetch_and_store")
+        .python_callable
+    )
+
+    class ClienteVazio:
+        def listar_orgaos(self) -> list[dict]:
+            return []
+
+    def escrita_proibida(*args: object, **kwargs: object) -> None:
+        pytest.fail("write_raw não pode ser chamado para uma resposta vazia")
+
+    monkeypatch.setitem(fetch_and_store.__globals__, "ClienteContratosGov", ClienteVazio)
+    monkeypatch.setitem(fetch_and_store.__globals__, "write_raw", escrita_proibida)
+
+    with pytest.raises(RuntimeError, match="Resposta vazia"):
+        fetch_and_store()
+
+
+def test_valid_response_is_written_unchanged_with_primary_key(
+    dagbag: DagBag, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetch_and_store = (
+        dagbag.dags["orgao_contratante_ingest_dag"]
+        .get_task("fetch_and_store")
+        .python_callable
+    )
+    payload = [{"codigo": "02000"}, {"codigo": "46000"}]
+    chamadas: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    class ClienteFake:
+        def listar_orgaos(self) -> list[dict[str, str]]:
+            return payload
+
+    def registrar_escrita(*args: object, **kwargs: object) -> None:
+        chamadas.append((args, kwargs))
+
+    monkeypatch.setitem(fetch_and_store.__globals__, "ClienteContratosGov", ClienteFake)
+    monkeypatch.setitem(fetch_and_store.__globals__, "write_raw", registrar_escrita)
+
+    assert fetch_and_store() == {"ingeridos": 2}
+    assert chamadas == [
+        (
+            ("contratos_gov", "orgao_contratante", payload),
+            {"primary_key": ["codigo"]},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("payload", "mensagem"),
+    [
+        ([{"codigo": "2000"}], "codigo inválido"),
+        ([{"codigo": 2000}], "codigo inválido"),
+        ([{"codigo": "02000"}, {"codigo": "02000"}], "Códigos duplicados"),
+    ],
+)
+def test_invalid_or_duplicate_codes_fail_before_write(
+    dagbag: DagBag,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: list[dict[str, object]],
+    mensagem: str,
+) -> None:
+    fetch_and_store = (
+        dagbag.dags["orgao_contratante_ingest_dag"]
+        .get_task("fetch_and_store")
+        .python_callable
+    )
+
+    class ClienteFake:
+        def listar_orgaos(self) -> list[dict[str, object]]:
+            return payload
+
+    def escrita_proibida(*args: object, **kwargs: object) -> None:
+        pytest.fail("write_raw não pode ser chamado para um lote inválido")
+
+    monkeypatch.setitem(fetch_and_store.__globals__, "ClienteContratosGov", ClienteFake)
+    monkeypatch.setitem(fetch_and_store.__globals__, "write_raw", escrita_proibida)
+
+    with pytest.raises(RuntimeError, match=mensagem):
+        fetch_and_store()

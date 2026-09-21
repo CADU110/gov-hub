@@ -1,3 +1,0 @@
-# A pasta existe antes das DAGs porque o dag_selector e o teste de DagBag já a
-# referenciam. Cada DAG de ingestão do contratos_gov é uma issue filha da #15
-# (#16 a #33); quando a primeira entrar, este arquivo pode sair.
