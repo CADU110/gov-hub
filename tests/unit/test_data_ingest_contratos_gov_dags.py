@@ -68,6 +68,14 @@ class TestContratosGovDagsIntegrity:
         ]
         assert not missing, f"DAGs sem a tag sistema:contratos_gov: {missing}"
 
+    def test_all_dags_have_dominio_tag(self, dagbag: DagBag) -> None:
+        missing = [
+            dag_id
+            for dag_id, dag in dagbag.dags.items()
+            if not any(t.startswith("dominio:") for t in dag.tags)
+        ]
+        assert not missing, f"DAGs sem tag dominio:: {missing}"
+
     def test_all_dags_have_owner(self, dagbag: DagBag) -> None:
         missing = [
             dag_id
