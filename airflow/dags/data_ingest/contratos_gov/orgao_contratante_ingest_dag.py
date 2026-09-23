@@ -5,6 +5,10 @@ faz uma única carga completa. A lista contém somente órgãos com contrato ati
 e ``codigo`` precisa permanecer texto para preservar zeros à esquerda. Uma
 resposta vazia é tratada como anomalia da fonte e falha antes da escrita; aceitar
 o lote vazio poderia aparentar, incorretamente, que todos os órgãos sumiram.
+Código duplicado também falha antes da escrita: no backend ``warehouse`` o
+``ON CONFLICT DO UPDATE`` recusa a mesma chave duas vezes no mesmo comando, e em
+``object_storage`` as duas linhas teriam o mesmo ``dt_ingest``, deixando a
+deduplicação da Silver sem critério para escolher uma.
 """
 
 import logging
