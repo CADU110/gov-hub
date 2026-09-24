@@ -22,8 +22,10 @@ Chave primária: codigo (UG SIAFI, 6 dígitos).
     No backend object_storage, a raw é append-only e a Silver deduplica
     por dt_ingest (ADR-0012).
 
-Horário: 08:00 — após o bloco compras_gov (01:00–07:00) e a transformação
-    do MGI (06:00), sem colidir com nenhum pipeline existente.
+Horário: 22:00 — fora da janela do compras_gov (01:00–07:00) e da
+    transformação do MGI (06:00). É a enumeração diária que dirige a varredura
+    de cabeçalhos por UG, então roda antes do bloco contratos_gov noturno
+    (docs/notas/contratos-gov-ingestao.md).
 """
 
 import logging
@@ -48,7 +50,7 @@ default_args = {
 
 @dag(
     dag_id="unidade_contratante_ingest_dag",
-    schedule="0 8 * * *",
+    schedule="0 22 * * *",
     start_date=datetime(2024, 1, 1),
     catchup=False,
     default_args=default_args,
@@ -57,7 +59,7 @@ default_args = {
         "(GET /api/contrato/unidades) para contratos_gov.raw_unidade_contratante. "
         "Endpoint aberto, sem autenticação e sem paginação: carga completa diária."
     ),
-    tags=["sistema:contratos_gov", "dominio:contratacoes"],
+    tags=["sistema:contratos_gov", "dominio:organizacional"],
 )
 def unidade_contratante_dag() -> None:
     @task
