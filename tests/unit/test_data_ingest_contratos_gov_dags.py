@@ -5,7 +5,6 @@ Molde do test_data_ingest_compras_gov_dags.py, sempre que uma dag diferente entr
 """
 
 import re
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, call
@@ -100,19 +99,23 @@ UG_A = "153173"
 UG_B = "200999"
 
 
-def task(dagbag: DagBag, task_id: str) -> Callable[..., Any]:
-    """Função Python por trás de uma task do TaskFlow, para chamar direto."""
+def task(dagbag: DagBag, task_id: str) -> Any:
+    """Função Python por trás de uma task do TaskFlow, para chamar direto.
+
+    O retorno é `Any` porque os helpers abaixo mexem no `__globals__` da função,
+    atributo que `Callable` não declara e que faria o `ty` reprovar.
+    """
     return dagbag.dags[DAG_ID].get_task(task_id).python_callable
 
 
-def usar_ugs_da_raw(alvo: Callable, monkeypatch: pytest.MonkeyPatch, ugs: list[str]):
+def usar_ugs_da_raw(alvo: Any, monkeypatch: pytest.MonkeyPatch, ugs: list[str]):
     """Faz distinct_raw_values devolver `ugs` e registra como foi chamada."""
     consulta = MagicMock(return_value=ugs)
     monkeypatch.setitem(alvo.__globals__, "distinct_raw_values", consulta)
     return consulta
 
 
-def usar_cliente(alvo: Callable, monkeypatch: pytest.MonkeyPatch, por_ug: dict):
+def usar_cliente(alvo: Any, monkeypatch: pytest.MonkeyPatch, por_ug: dict):
     """Faz listar_contratos_ug responder conforme `por_ug`, uma entrada por UG."""
     cliente = MagicMock()
     cliente.listar_contratos_ug.side_effect = lambda codigo: por_ug[codigo]
@@ -120,7 +123,7 @@ def usar_cliente(alvo: Callable, monkeypatch: pytest.MonkeyPatch, por_ug: dict):
     return cliente
 
 
-def capturar_escritas(alvo: Callable, monkeypatch: pytest.MonkeyPatch):
+def capturar_escritas(alvo: Any, monkeypatch: pytest.MonkeyPatch):
     """Substitui write_raw por um espião, para inspecionar as chamadas."""
     escrita = MagicMock()
     monkeypatch.setitem(alvo.__globals__, "write_raw", escrita)
