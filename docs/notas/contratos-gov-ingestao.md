@@ -78,6 +78,28 @@ O sábado é deliberado: a varredura de cabeçalhos leva mais de uma hora, os
 sub-recursos vêm depois dela, e assim a cadeia inteira termina com folga antes da
 janela do `compras_gov` no domingo de madrugada.
 
+## Contratos inativos: UG vazia é a regra
+
+Amostra de 12 UGs sorteadas (semente 1) contra
+`/api/contrato/inativo/ug/{codigo}`, em **2026-10-07**, de um total de 3.786
+UGs:
+
+| UGs | Com inativo | Vazias | Contratos | `id` repetido |
+|---|---|---|---|---|
+| 12 | 4 | 8 | 100 | 0 |
+
+O formato é o mesmo do cabeçalho ativo, com `situacao: "Inativo"` e
+`justificativa_inativo` preenchida (ex.: `"Rescindido"`). Como dois terços das
+UGs não têm inativo, a `contrato_inativo_ingest_dag` não pode reprovar uma
+execução sem nenhum contrato da mesma forma que a de ativos faz: com as 10 UGs do
+`INGEST_MAX_UGS` local, isso aconteceria por acaso em cerca de 2% das execuções.
+A DAG só trata o zero como anomalia da fonte a partir de **50 UGs varridas**,
+onde a chance de todas virem vazias por acaso é da ordem de 1e-9.
+
+O mesmo `id` aparece em `raw_contrato_ativo` e em `raw_contrato_inativo` quando o
+contrato é inativado entre duas varreduras. A Silver que unifica as duas precisa
+deduplicar por `id` **entre** as duas raws, pelo `dt_ingest`.
+
 ## Escopo de detalhamento dos sub-recursos
 
 Detalhar todos os contratos a cada execução não é viável. O escopo é
