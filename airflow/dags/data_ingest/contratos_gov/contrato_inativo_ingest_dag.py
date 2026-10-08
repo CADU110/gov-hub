@@ -24,6 +24,20 @@ UG que tinha contrato inativo na raw e voltou vazia vira alerta, não erro.
     mais forte aqui do que nos ativos; ainda assim reativação é possível na
     fonte, e quem decide é quem lê o alerta.
 
+Por que só as UGs de unidade_contratante?
+    A lista de /api/contrato/unidades se comporta como lista de UGs com contrato
+    ativo: numa amostra de 60 UGs dela (2026-10-07), nenhuma estava sem ativo.
+    UG que só tem contrato inativo fica, portanto, fora desta varredura. A
+    primeira versão aceita essa lacuna de propósito: alcançá-la pede outra
+    lista de UGs (a proposta da issue #19 é compras_gov.uasg), que é dependência
+    entre sistemas e multiplica as chamadas por UGs que na maioria não têm
+    contrato nenhum. Fica registrada em docs/notas/contratos-gov-ingestao.md.
+
+Por que não roda inteira na máquina do desenvolvedor?
+    A varredura completa são milhares de chamadas, estimadas em horas. No
+    compose, INGEST_MAX_UGS (local.env) trunca a lista e é com essa amostra que
+    a DAG é validada; a primeira execução completa acontece em homologação.
+
 Chave primária: id (inteiro, global no sistema, o mesmo id do contrato ativo).
     No backend warehouse, write_raw faz upsert por `id`; no object_storage a
     raw é append-only e a Silver deduplica por dt_ingest. Um contrato que é

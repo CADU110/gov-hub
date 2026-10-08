@@ -100,6 +100,26 @@ O mesmo `id` aparece em `raw_contrato_ativo` e em `raw_contrato_inativo` quando 
 contrato é inativado entre duas varreduras. A Silver que unifica as duas precisa
 deduplicar por `id` **entre** as duas raws, pelo `dt_ingest`.
 
+### Cobertura: UG só com contrato inativo fica de fora
+
+A varredura parte da raw de `unidade_contratante`, isto é, de
+`/api/contrato/unidades`. Numa segunda amostra, de 60 UGs dessa lista
+(sorteio com semente 7, em **2026-10-07**), as 59 que responderam ao endpoint
+de ativos tinham pelo menos um contrato ativo; a 60ª excedeu 180 s nele. A lista
+se comporta, então, como lista de UGs **com contrato ativo**, e uma UG cujos
+contratos estão todos inativos não é alcançada.
+
+A primeira versão aceita essa lacuna. Fechá-la pede outra fonte de UGs (a issue
+#19 propõe `compras_gov.uasg`), o que cria dependência entre sistemas e
+multiplica as chamadas por UGs que, na maioria, não têm contrato nenhum. O
+tamanho da lacuna ainda não foi medido; isso fica para quando a raw de
+`compras_gov.uasg` estiver disponível para comparar as duas listas.
+
+A mesma amostra mostrou menos UGs vazias de inativo do que a de 12: 17 das 60
+(28%), contra 8 das 12. Com menos UGs vazias, a chance de uma varredura vir
+inteira vazia por acaso só diminui, então o limiar de 50 UGs continua
+conservador.
+
 ## Escopo de detalhamento dos sub-recursos
 
 Detalhar todos os contratos a cada execução não é viável. O escopo é
