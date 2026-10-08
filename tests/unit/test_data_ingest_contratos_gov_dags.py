@@ -11,9 +11,12 @@ protege são as regras estruturais, não a quantidade.
 import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, call
 
 import pytest
 from airflow.models import DagBag
+from landing_zone import RawIndisponivel
 
 pytestmark = pytest.mark.unit
 
@@ -26,7 +29,7 @@ DAGS_FOLDER = (
 )
 
 TAG_FORMAT = re.compile(r"^[a-z_]+:[a-z0-9_]+$")
-TAGS_OBRIGATORIAS = {"sistema:contratos_gov", "dominio:contratacoes"}
+TAGS_OBRIGATORIAS = {"sistema:contratos_gov"}
 
 
 @pytest.fixture(scope="module")
@@ -70,6 +73,14 @@ class TestContratosGovDagsIntegrity:
         }
         assert not missing, f"DAGs sem tags obrigatórias: {missing}"
 
+    def test_all_dags_have_dominio_tag(self, dagbag: DagBag) -> None:
+        missing = [
+            dag_id
+            for dag_id, dag in dagbag.dags.items()
+            if not any(t.startswith("dominio:") for t in dag.tags)
+        ]
+        assert not missing, f"DAGs sem tag dominio: {missing}"
+
     def test_all_dags_have_owner(self, dagbag: DagBag) -> None:
         missing = [
             dag_id
@@ -83,6 +94,13 @@ class TestContratosGovDagsIntegrity:
         assert {"sistema:contratos_gov", "dominio:contratacoes"}.issubset(dag.tags)
         assert dag.default_args["owner"] == "mgi"
         assert dag.description
+
+    def test_unidade_contratante_tem_dominio_organizacional(self, dagbag: DagBag) -> None:
+        dag = dagbag.dags["unidade_contratante_ingest_dag"]
+        assert "dominio:organizacional" in dag.tags
+
+
+# --- orgao_contratante (issue #17) ------------------------------------------
 
 
 def _preparar_fetch_and_store(
@@ -155,3 +173,225 @@ def test_invalid_response_fails_before_write(
 
     with pytest.raises(RuntimeError, match=mensagem):
         fetch_and_store()
+
+
+# --- contrato_ativo (issue #18) ---------------------------------------------
+#
+# A DAG varre uma UG por chamada: a API não pagina nem filtra por período, e a
+# lista de UGs vem da raw que a unidade_contratante_ingest_dag (issue #16)
+# grava. Daí o que os testes cobram: particionar a lista em blocos em vez de
+# expandir sobre as 3.781 UGs (batching.py), falhar cedo quando a dependência
+# não foi ingerida, e não deixar uma UG vazia derrubar o bloco inteiro.
+
+DAG_ID = "contrato_ativo_ingest_dag"
+SISTEMA = "contratos_gov"
+ENTIDADE = "contrato_ativo"
+BLOCK_SIZE = 25  # espelha a constante da DAG
+UG_A = "153173"
+UG_B = "200999"
+
+
+def task(dagbag: DagBag, task_id: str) -> Any:
+    """Função Python por trás de uma task do TaskFlow, para chamar direto.
+
+    O retorno é `Any` porque os helpers abaixo mexem no `__globals__` da função,
+    atributo que `Callable` não declara e que faria o `ty` reprovar.
+    """
+    return dagbag.dags[DAG_ID].get_task(task_id).python_callable
+
+
+def usar_ugs_da_raw(alvo: Any, monkeypatch: pytest.MonkeyPatch, ugs: list[str]):
+    """Faz distinct_raw_values devolver `ugs` e registra como foi chamada."""
+    consulta = MagicMock(return_value=ugs)
+    monkeypatch.setitem(alvo.__globals__, "distinct_raw_values", consulta)
+    return consulta
+
+
+def usar_cliente(alvo: Any, monkeypatch: pytest.MonkeyPatch, por_ug: dict):
+    """Faz listar_contratos_ug responder conforme `por_ug`, uma entrada por UG."""
+    cliente = MagicMock()
+    cliente.listar_contratos_ug.side_effect = lambda codigo: por_ug[codigo]
+    monkeypatch.setitem(alvo.__globals__, "ClienteContratosGov", lambda: cliente)
+    return cliente
+
+
+def capturar_escritas(alvo: Any, monkeypatch: pytest.MonkeyPatch):
+    """Substitui write_raw por um espião, para inspecionar as chamadas."""
+    escrita = MagicMock()
+    monkeypatch.setitem(alvo.__globals__, "write_raw", escrita)
+    return escrita
+
+
+def ugs_falsas(quantidade: int) -> list[str]:
+    return [f"{codigo:06d}" for codigo in range(quantidade)]
+
+
+class TestBlocosDeUgs:
+    def test_le_a_lista_da_entidade_unidade_contratante(self, dagbag, monkeypatch):
+        blocos = task(dagbag, "get_ug_blocks")
+        consulta = usar_ugs_da_raw(blocos, monkeypatch, [UG_A])
+
+        blocos()
+
+        consulta.assert_called_once_with(SISTEMA, "unidade_contratante", "codigo")
+
+    def test_divide_a_lista_em_blocos(self, dagbag, monkeypatch):
+        blocos = task(dagbag, "get_ug_blocks")
+        monkeypatch.delenv("INGEST_MAX_UGS", raising=False)
+        usar_ugs_da_raw(blocos, monkeypatch, ugs_falsas(60))
+
+        assert [len(bloco) for bloco in blocos()] == [BLOCK_SIZE, BLOCK_SIZE, 10]
+
+    def test_nao_perde_nem_reordena_ug(self, dagbag, monkeypatch):
+        blocos = task(dagbag, "get_ug_blocks")
+        ugs = ugs_falsas(60)
+        monkeypatch.delenv("INGEST_MAX_UGS", raising=False)
+        usar_ugs_da_raw(blocos, monkeypatch, ugs)
+
+        assert [ug for bloco in blocos() for ug in bloco] == ugs
+
+    def test_respeita_o_teto_local(self, dagbag, monkeypatch):
+        """INGEST_MAX_UGS existe só no local.env: a varredura completa não roda
+        em máquina de desenvolvedor."""
+        blocos = task(dagbag, "get_ug_blocks")
+        monkeypatch.setenv("INGEST_MAX_UGS", "10")
+        usar_ugs_da_raw(blocos, monkeypatch, ugs_falsas(100))
+
+        assert sum(len(bloco) for bloco in blocos()) == 10
+
+    def test_raw_ausente_diz_qual_dag_rodar_antes(self, dagbag, monkeypatch):
+        blocos = task(dagbag, "get_ug_blocks")
+        consulta = usar_ugs_da_raw(blocos, monkeypatch, [])
+        consulta.side_effect = FileNotFoundError("raw_unidade_contratante")
+
+        with pytest.raises(RuntimeError) as erro:
+            blocos()
+
+        assert "unidade_contratante_ingest_dag" in str(erro.value)
+
+    def test_raw_vazia_falha_antes_de_varrer(self, dagbag, monkeypatch):
+        """Tabela existente e vazia é anomalia: sem UG não há o que varrer."""
+        blocos = task(dagbag, "get_ug_blocks")
+        usar_ugs_da_raw(blocos, monkeypatch, [])
+
+        with pytest.raises(RuntimeError) as erro:
+            blocos()
+
+        assert "unidade_contratante" in str(erro.value)
+
+
+class TestIngestaoPorUg:
+    def test_grava_um_lote_por_ug(self, dagbag, monkeypatch):
+        """Uma escrita por UG, não uma por bloco: falha no meio do bloco não
+        descarta o que já veio, e a contagem por UG sobra no log."""
+        ingestao = task(dagbag, "ingest_ugs")
+        usar_cliente(
+            ingestao, monkeypatch, {UG_A: [{"id": 1}, {"id": 2}], UG_B: [{"id": 3}]}
+        )
+        escrita = capturar_escritas(ingestao, monkeypatch)
+
+        ingestao([UG_A, UG_B])
+
+        assert escrita.call_args_list == [
+            call(SISTEMA, ENTIDADE, [{"id": 1}, {"id": 2}], primary_key=["id"]),
+            call(SISTEMA, ENTIDADE, [{"id": 3}], primary_key=["id"]),
+        ]
+
+    def test_conta_os_contratos_do_bloco(self, dagbag, monkeypatch):
+        ingestao = task(dagbag, "ingest_ugs")
+        usar_cliente(
+            ingestao, monkeypatch, {UG_A: [{"id": 1}, {"id": 2}], UG_B: [{"id": 3}]}
+        )
+        capturar_escritas(ingestao, monkeypatch)
+
+        assert ingestao([UG_A, UG_B])["contratos"] == 3
+
+    def test_ug_sem_contratos_nao_grava(self, dagbag, monkeypatch):
+        """UG inexistente e UG sem contrato respondem igual (200 []): registra
+        a UG vazia e segue para a próxima."""
+        ingestao = task(dagbag, "ingest_ugs")
+        usar_cliente(ingestao, monkeypatch, {UG_A: [], UG_B: [{"id": 7}]})
+        escrita = capturar_escritas(ingestao, monkeypatch)
+
+        resultado = ingestao([UG_A, UG_B])
+
+        assert escrita.call_args_list == [
+            call(SISTEMA, ENTIDADE, [{"id": 7}], primary_key=["id"])
+        ]
+        assert resultado["ugs_vazias"] == [UG_A]
+
+    def test_erro_da_api_interrompe_o_bloco(self, dagbag, monkeypatch):
+        """Erro de rede não vira lote vazio: a task falha e o Airflow refaz o
+        bloco (retries em default_args)."""
+        ingestao = task(dagbag, "ingest_ugs")
+        cliente = usar_cliente(ingestao, monkeypatch, {UG_A: [{"id": 1}]})
+        cliente.listar_contratos_ug.side_effect = ConnectionError("timeout")
+        capturar_escritas(ingestao, monkeypatch)
+
+        with pytest.raises(ConnectionError):
+            ingestao([UG_A])
+
+
+class TestValidacaoFinal:
+    def test_soma_os_totais_dos_blocos(self, dagbag):
+        validacao = task(dagbag, "validate")
+
+        total = validacao(
+            [
+                {"contratos": 10, "ugs_vazias": []},
+                {"contratos": 5, "ugs_vazias": [UG_B]},
+            ]
+        )
+
+        assert total == 15
+
+    def test_execucao_sem_nenhum_contrato_falha(self, dagbag):
+        """Todas as UGs vazias na mesma execução é sinal de fonte fora do ar,
+        não de realidade."""
+        validacao = task(dagbag, "validate")
+
+        with pytest.raises(RuntimeError) as erro:
+            validacao([{"contratos": 0, "ugs_vazias": [UG_A, UG_B]}])
+
+        assert "nenhum contrato" in str(erro.value)
+
+
+class TestUgsQueZeraram:
+    """UG que já tinha contrato na raw e voltou vazia vira alerta, não erro."""
+
+    def test_le_as_ugs_da_propria_raw_de_contrato_ativo(self, dagbag, monkeypatch):
+        antes = task(dagbag, "get_ugs_com_contrato")
+        consulta = usar_ugs_da_raw(antes, monkeypatch, [UG_A])
+
+        assert antes() == [UG_A]
+        consulta.assert_called_once_with(SISTEMA, ENTIDADE, "unidade_gestora_codigo")
+
+    def test_primeira_execucao_sem_raw_nao_falha(self, dagbag, monkeypatch):
+        antes = task(dagbag, "get_ugs_com_contrato")
+        consulta = usar_ugs_da_raw(antes, monkeypatch, [])
+        consulta.side_effect = RawIndisponivel("raw_contrato_ativo")
+
+        assert antes() == []
+
+    def test_roda_antes_da_varredura(self, dagbag):
+        dag = dagbag.dags[DAG_ID]
+
+        assert "ingest_ugs" in dag.get_task("get_ugs_com_contrato").downstream_task_ids
+
+    def test_ug_que_tinha_contrato_e_zerou_gera_alerta(self, dagbag, caplog):
+        validacao = task(dagbag, "validate")
+
+        with caplog.at_level("WARNING"):
+            validacao([{"contratos": 5, "ugs_vazias": [UG_A]}], [UG_A, UG_B])
+
+        alertas = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(alertas) == 1
+        assert UG_A in alertas[0].getMessage()
+
+    def test_ug_que_sempre_foi_vazia_nao_gera_alerta(self, dagbag, caplog):
+        validacao = task(dagbag, "validate")
+
+        with caplog.at_level("WARNING"):
+            validacao([{"contratos": 5, "ugs_vazias": [UG_A]}], [UG_B])
+
+        assert not [r for r in caplog.records if r.levelname == "WARNING"]
