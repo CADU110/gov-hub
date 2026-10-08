@@ -140,8 +140,10 @@ com muitos contratos pesa mais que vários pequenos. Antes de incluir um órgão
 grande, vale medir quantos contratos ele tem (`contrato_ativo` já na raw) e
 estimar: uma chamada por contrato por sub-recurso.
 
-O resolvedor dessa Variable não foi escrito na fundação: ele entra com a primeira
-DAG que precisa dele (#18/#19), para não versionar código que nada chama.
+O resolvedor dessa Variable é `airflow/helpers/contratos_gov_scope.py`, escrito
+com a primeira DAG de sub-recurso (#22). Ele valida a lista e une os `id` de
+`contrato_ativo` e `contrato_inativo` dos órgãos no escopo; as demais DAGs de
+sub-recurso reutilizam as mesmas duas funções.
 
 ### Sobre o código do MGI: 46000, não 48000
 

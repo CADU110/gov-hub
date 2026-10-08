@@ -69,6 +69,20 @@ def test_muitos_ids_nao_excedem_o_limite_de_mapeamento(
     assert sum(map(len, blocos)) == 26000
 
 
+def test_limite_local_zerado_falha_antes_de_expandir(
+    dagbag: DagBag, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    preparar = task(dagbag, "get_contract_blocks")
+    monkeypatch.setitem(preparar.__globals__, "orgaos_no_escopo", lambda: {"46000"})
+    monkeypatch.setitem(
+        preparar.__globals__, "ids_contratos_no_escopo", lambda _: ["2289", "2290"]
+    )
+    monkeypatch.setenv("INGEST_MAX_CONTRATOS", "0")
+
+    with pytest.raises(RuntimeError, match="INGEST_MAX_CONTRATOS"):
+        preparar()
+
+
 def test_empenhos_sao_gravados_sem_alterar_o_payload(
     dagbag: DagBag, monkeypatch: pytest.MonkeyPatch
 ) -> None:
