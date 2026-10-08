@@ -6,6 +6,7 @@ produz o resultado certo nos dois backends — e que o vocabulário de sistema e
 entidade não muda entre eles.
 """
 
+import json
 from datetime import date
 from unittest.mock import MagicMock, patch
 
@@ -87,6 +88,32 @@ class TestEscritaNoWarehouse:
         assert kwargs["primary_key"] == kwargs["conflict_fields"] == ["codigoorgao"]
         assert all("dt_ingest" in r for r in registros)
 
+    def test_campos_aninhados_opt_in_sao_json_recuperavel(
+        self, backend_warehouse
+    ) -> None:
+        payload = [{"id": 7, "credor_obj": {"nome": "João"}, "links": ["a", "b"]}]
+        cliente = MagicMock()
+        with patch.dict(
+            "sys.modules",
+            {
+                "cliente_postgres": MagicMock(ClientPostgresDB=lambda _: cliente),
+                "postgres_helpers": MagicMock(get_postgres_conn=lambda _: "conn"),
+            },
+        ):
+            landing_zone.write_raw(
+                "contratos_gov",
+                "contrato_empenho",
+                payload,
+                primary_key=["id"],
+                json_fields=["credor_obj", "links"],
+            )
+
+        enviados = cliente.insert_data.call_args.args[0]
+        assert json.loads(enviados[0]["credor_obj"]) == {"nome": "João"}
+        assert json.loads(enviados[0]["links"]) == ["a", "b"]
+        assert payload[0]["credor_obj"] == {"nome": "João"}
+        assert payload[0]["links"] == ["a", "b"]
+
 
 class TestEscritaEmObjectStorage:
     def test_grava_parquet_no_caminho_do_adr_0012(self, backend_object_storage) -> None:
@@ -140,6 +167,25 @@ class TestEscritaEmObjectStorage:
         assert segundo is not None
         assert primeiro != segundo
         assert escrever.call_count == 2
+
+    def test_campos_aninhados_permanecem_nativos(self, backend_object_storage) -> None:
+        payload = [{"id": 7, "credor_obj": {"nome": "João"}, "links": ["a", "b"]}]
+        with (
+            patch.object(landing_zone, "write_parquet") as escrever,
+            patch.object(landing_zone, "get_bucket", return_value="data-lake"),
+        ):
+            escrever.side_effect = lambda df, caminho: caminho
+            landing_zone.write_raw(
+                "contratos_gov",
+                "contrato_empenho",
+                payload,
+                json_fields=["credor_obj", "links"],
+                run_id="teste",
+            )
+
+        dados = escrever.call_args.args[0]
+        assert dados["credor_obj"].to_list() == [{"nome": "João"}]
+        assert dados["links"].to_list() == [["a", "b"]]
 
     def test_sem_contexto_de_execucao_ainda_grava(self, backend_object_storage) -> None:
         """Fora de uma execução do Airflow o arquivo sai com run_id de horário."""

@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from datetime import date, datetime
@@ -129,6 +130,7 @@ def write_raw(
     run_id: str | None = None,
     run_date: date | None = None,
     conn_id: str = CONEXAO_WAREHOUSE_PADRAO,
+    json_fields: list[str] | None = None,
 ) -> str | None:
     """Entrega um lote à zona raw e devolve o destino onde ele ficou.
 
@@ -145,7 +147,9 @@ def write_raw(
 
     if backend == BACKEND_OBJECT_STORAGE:
         return _write_raw_object_storage(source, entity, carimbados, run_id, run_date)
-    return _write_raw_warehouse(source, entity, carimbados, primary_key, conn_id)
+    return _write_raw_warehouse(
+        source, entity, carimbados, primary_key, conn_id, json_fields
+    )
 
 
 def _run_id_do_contexto(source: str, entity: str) -> str:
@@ -195,6 +199,7 @@ def _write_raw_warehouse(
     records: list[dict],
     primary_key: list[str] | None,
     conn_id: str,
+    json_fields: list[str] | None = None,
 ) -> str:
     """Materializa o lote como tabela raw no destino analítico do órgão.
 
@@ -205,10 +210,21 @@ def _write_raw_warehouse(
     from cliente_postgres import ClientPostgresDB
     from postgres_helpers import get_postgres_conn
 
+    dados_sql = [
+        {
+            campo: (
+                json.dumps(valor, ensure_ascii=False)
+                if campo in (json_fields or []) and isinstance(valor, (dict, list))
+                else valor
+            )
+            for campo, valor in registro.items()
+        }
+        for registro in records
+    ]
     tabela = raw_table_name(entity)
     cliente = ClientPostgresDB(get_postgres_conn(conn_id))
     cliente.insert_data(
-        records,
+        dados_sql,
         tabela,
         primary_key=primary_key,
         conflict_fields=primary_key,
