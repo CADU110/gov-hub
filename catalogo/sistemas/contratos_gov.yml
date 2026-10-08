@@ -167,11 +167,14 @@ entidades:
     dominio: contratacoes
     dag: contrato_empenho_ingest_dag
     origem_atual: contratos_gov.raw_contrato_empenho
-    chave_primaria: [id]
+    chave_primaria: [contrato_id, id]
     classificacao: publico
     chaves: []
     # O payload não traz contrato_id: ele é injetado pelo cliente a partir da
     # URL da chamada, sem o que não haveria como ligar o empenho ao contrato.
+    # O id é o da nota de empenho, que a fonte vincula a vários contratos (715
+    # de 1.627 ids em mais de um contrato, amostra de 2026-10-08); por isso
+    # contrato_id faz parte da chave.
 
   contrato_fatura:
     descricao: >-

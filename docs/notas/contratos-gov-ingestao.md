@@ -145,6 +145,39 @@ com a primeira DAG de sub-recurso (#22). Ele valida a lista e une os `id` de
 `contrato_ativo` e `contrato_inativo` dos órgãos no escopo; as demais DAGs de
 sub-recurso reutilizam as mesmas duas funções.
 
+### Empenhos: o `id` não identifica a linha sozinho
+
+A issue #22 registrou `id` como chave de `contrato_empenho`, com base em
+contratos olhados um a um. Medição de **2026-10-08** em 80 contratos ativos da
+UG 201057 (órgão 46000), contra `GET /api/contrato/{contrato_id}/empenhos`:
+
+| Contratos | Com empenho | Linhas | `id` distintos | `id` em mais de um contrato | Linhas repetidas no mesmo contrato |
+|---|---|---|---|---|---|
+| 80 | 24 | 3.205 | 1.627 | 715 | 13 (12 no contrato 93055, 1 no 212249) |
+
+O `id` é o da nota de empenho, e a fonte vincula a mesma nota a vários
+contratos: o empenho 13243362 aparece nos contratos 2289, 212249, 213150,
+223657, 226366 e 227024. No código da fonte
+(`ContratoController::empenhosPorContratoId`, em gitlab.com/comprasnet/contratos)
+a consulta parte da tabela de vínculo `contratoempenhos` e devolve
+`empenho->id`, sem restrição de unicidade no vínculo.
+
+Daí duas decisões na `contrato_empenho_ingest_dag`:
+
+- a chave primária é `(contrato_id, id)`. Com `id` sozinho, o upsert do backend
+  `warehouse` reduziria os 3.192 vínculos distintos da amostra a 1.627 linhas e
+  deixaria em cada uma o `contrato_id` do último contrato lido;
+- linha idêntica repetida dentro do mesmo contrato é descartada antes da
+  escrita, com aviso no log. O contrato 93055 devolveu 563 linhas para 551 ids,
+  e as 13 linhas repetidas da amostra eram cópias exatas. Mesmo `id` com
+  conteúdo diferente no mesmo contrato continua sendo erro.
+
+Conferido no backend `warehouse` com as mesmas 80 chamadas: 3.192 linhas na
+raw, 3.192 pares `(contrato_id, id)` distintos, nenhum par da API faltando, e a
+mesma contagem depois de uma segunda execução.
+
+Os demais sub-recursos (#20 a #33) ainda não foram medidos dessa forma.
+
 ### Sobre o código do MGI: 46000, não 48000
 
 Na API do Contratos.gov.br, o órgão **46000** está presente na lista de órgãos
