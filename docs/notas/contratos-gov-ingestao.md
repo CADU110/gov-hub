@@ -134,6 +134,14 @@ As DAGs de sub-recurso (#20 a #33) leem essa Variable, filtram na raw os
 contratos cujas UGs pertencem a esses órgãos e só detalham esses. O default é o
 MGI, único órgão consumidor hoje.
 
+No compose, `INGEST_MAX_UGS=10` limita os cabeçalhos (#18 e #19). As dez
+primeiras UGs por código não incluem o MGI; portanto, numa raw local recém-criada,
+a DAG de empenhos (#22) falha corretamente por não encontrar contratos do órgão
+46000. Para validá-la, ingira primeiro cabeçalhos de uma UG do MGI (por exemplo,
+201057) nas duas raws ou ajuste **somente no ambiente de teste** a Variable de
+escopo para um órgão presente na amostra. Nenhuma dessas escolhas altera o
+escopo padrão de homologação ou produção.
+
 **Para ampliar**: acrescente o código do órgão à Variable. O custo cresce com o
 número de contratos dos órgãos incluídos, não com o número de órgãos — um órgão
 com muitos contratos pesa mais que vários pequenos. Antes de incluir um órgão

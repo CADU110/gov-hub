@@ -3,8 +3,12 @@
 from pathlib import Path
 from unittest.mock import MagicMock, call
 
+import fsspec
+import polars as pl
 import pytest
 from airflow.models import DagBag
+
+import landing_zone
 
 pytestmark = pytest.mark.unit
 
@@ -195,6 +199,48 @@ def test_cada_contrato_tem_arquivo_proprio_no_object_storage(
         "manual__2026-10-08__contrato_2289",
         "manual__2026-10-08__contrato_2290",
     ]
+
+
+def test_object_storage_mantem_arquivos_por_contrato_e_execucao(
+    dagbag: DagBag, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """O backend append-only não sobrescreve outro contrato nem outro run."""
+    ingerir = task(dagbag, "ingest_contracts")
+    cliente = MagicMock()
+    cliente.listar_subrecurso.side_effect = lambda contrato_id, _: [
+        {"id": 7, "contrato_id": contrato_id, "credor_obj": {"nome": "NOME"}}
+    ]
+    run_id = ["primeiro"]
+    monkeypatch.setitem(ingerir.__globals__, "ClienteContratosGov", lambda: cliente)
+    monkeypatch.setitem(ingerir.__globals__, "write_raw", landing_zone.write_raw)
+    monkeypatch.setitem(
+        ingerir.__globals__, "get_current_context", lambda: {"run_id": run_id[0]}
+    )
+    monkeypatch.setattr(
+        landing_zone,
+        "get_storage_fs",
+        lambda: fsspec.filesystem("file", auto_mkdir=True),
+    )
+    monkeypatch.setattr(landing_zone, "get_bucket", lambda: str(tmp_path))
+    monkeypatch.setenv("RAW_BACKEND", "object_storage")
+
+    assert ingerir(["2289", "2290"])["empenhos"] == 2
+    run_id[0] = "segundo"
+    assert ingerir(["2289", "2290"])["empenhos"] == 2
+
+    arquivos = sorted(tmp_path.rglob("*.parquet"))
+    assert len(arquivos) == 4
+    assert {arquivo.stem for arquivo in arquivos} == {
+        "primeiro__contrato_2289",
+        "primeiro__contrato_2290",
+        "segundo__contrato_2289",
+        "segundo__contrato_2290",
+    }
+    for arquivo in arquivos:
+        registro = pl.read_parquet(arquivo).to_dicts()[0]
+        assert registro["contrato_id"] in arquivo.stem
+        assert registro["dt_ingest"]
+        assert registro["credor_obj"] == {"nome": "NOME"}
 
 
 @pytest.mark.parametrize(

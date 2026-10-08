@@ -20,6 +20,10 @@ as escritas do mesmo run não se sobrescrevam. A Silver fará o recorte temporal
 por data_emissao. A varredura completa leva milhares de chamadas e não deve
 rodar na máquina do desenvolvedor: INGEST_MAX_CONTRATOS limita a amostra no
 compose, e a primeira execução completa deve ocorrer em homologação.
+Com o limite padrão de 10 UGs no compose, os cabeçalhos ingeridos podem não
+conter contratos do MGI (órgão 46000). Para validar esta DAG localmente, a raw
+de ativos e inativos precisa conter contratos de um órgão da Variable de
+escopo; não se amplia a varredura de UGs só para contornar esse recorte.
 """
 
 import logging
