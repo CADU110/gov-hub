@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import psycopg2
 import psycopg2.errors
 import psycopg2.extras
-from pandas import json_normalize
 import pandas as pd
 import io
 
@@ -31,17 +30,46 @@ class ClientPostgresDB:
         digest = hashlib.sha1(sanitized.encode()).hexdigest()[:8]
         return f"{sanitized[:54]}_{digest}"
 
+    @staticmethod
+    def _flatten_record(record: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
+        flattened: Dict[str, Any] = {}
+        for key, value in record.items():
+            name = f"{prefix}{key}"
+            if isinstance(value, dict):
+                flattened.update(
+                    ClientPostgresDB._flatten_record(
+                        value, f"{name}{ClientPostgresDB.SEPARATOR}"
+                    )
+                )
+            else:
+                flattened[name] = value
+        return flattened
+
     def _flatten_data(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        return list(
-            map(
-                lambda d: {
-                    str(k): v if type(v) is not list else str(v) for k, v in d.items()
-                },
-                json_normalize(data, sep=ClientPostgresDB.SEPARATOR).to_dict(
-                    orient="records"
-                ),
-            )
-        )
+        """Achata o lote e alinha todos os registros às mesmas colunas.
+
+        Mesmo resultado do pandas.json_normalize que existia aqui (objetos
+        aninhados unidos por SEPARATOR, união das colunas na ordem em que
+        aparecem, listas como texto), menos a conversão de tipo. O pandas guarda
+        uma coluna de inteiros com algum valor faltando como float64: no lote
+        que tinha um nulo, todo `5` virava `5.0`, e o faltante virava NaN, que
+        o psycopg2 grava como o texto 'NaN' em vez de NULL. Como a coerção era
+        por lote, a mesma coluna da raw misturava `5` e `5.0`, e a chave
+        conformada (normalização `digitos`) transformava `26000.0` em `260000`.
+        """
+        flattened = [self._flatten_record(record) for record in data]
+        columns = dict.fromkeys(key for record in flattened for key in record)
+        return [
+            {
+                str(column): (
+                    str(record.get(column))
+                    if type(record.get(column)) is list
+                    else record.get(column)
+                )
+                for column in columns
+            }
+            for record in flattened
+        ]
 
     def __init__(self, conn_str: str) -> None:
         self.conn_str = conn_str
