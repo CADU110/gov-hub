@@ -186,6 +186,53 @@ mesma contagem depois de uma segunda execução.
 
 Os demais sub-recursos (#20 a #33) ainda não foram medidos dessa forma.
 
+### Itens: `id` sozinho, objeto de data e histórico aninhado
+
+`GET /api/contrato/{contrato_id}/itens` responde sem token, em lista, sem
+paginação nem filtro de data. Ao contrário dos empenhos, o payload já traz
+`contrato_id` (como número); a `contrato_item_ingest_dag` compara esse valor
+com o da URL em toda linha e falha antes da escrita se divergirem.
+
+Medição de **2026-10-12** em 50 contratos do órgão 17000 (escopo local; o
+padrão é 46000), com `INGEST_MAX_CONTRATOS=50` no compose:
+
+| Contratos | Com item | Linhas | `id` distintos | `id` em mais de um contrato |
+|---|---|---|---|---|
+| 50 | 50 | 147 | 147 | 0 |
+
+Daí as decisões da DAG:
+
+- a chave primária é só `id`, como o catálogo declara: na amostra, nenhum `id`
+  de item apareceu em mais de um contrato. `id` repetido no mesmo lote
+  interrompe a execução em vez de ser descartado, porque a repetição observada
+  nos empenhos não apareceu nos itens e descartá-la esconderia o caso;
+- `data_inicio_item` é objeto `{date, timezone_type, timezone}` (serialização
+  do Carbon/PHP) e `historico_item` é lista de termos. Os dois são gravados
+  como JSON no `warehouse` e como objetos nativos no `object_storage`, e a
+  Silver converte a data e explode o histórico.
+
+Particularidades do payload que a Silver precisa tratar (contrato 2289, mesma
+data):
+
+- `catmatseritem_id` e `tipo_id` chegam como **texto descritivo** (por exemplo,
+  `"Serviço"`), não como código. O cruzamento com o catálogo de
+  material/serviço do `compras_gov`, previsto no catálogo, não pode usar esse
+  campo como está;
+- `quantidade`, `valorunitario` e `valortotal` são strings com formatação
+  brasileira (`"7.532.888,13"`);
+- dentro de `historico_item`, o mesmo `contrato_historico_id` pode aparecer
+  mais de uma vez com valores diferentes (235545, duas linhas de 2021-04-16 com
+  `valor_unitario` 2,90 e 2,97). Ele não serve sozinho como chave da linha
+  explodida.
+
+Conferido no backend `warehouse`: 147 linhas na raw, 147 `id` distintos, igual
+ao total que a DAG leu da API, amostra igual à API na mesma data (contrato
+166513: 11 itens na raw e na API, com quantidade e valor unitário iguais),
+`dt_ingest` e `contrato_id` preenchidos em toda linha, e a mesma contagem
+depois de uma segunda execução. O `object_storage` (um Parquet por contrato,
+com a data e o histórico preservados) é coberto por
+`test_object_storage_preserva_data_e_historico_aninhados`.
+
 ### Sobre o código do MGI: 46000, não 48000
 
 Na API do Contratos.gov.br, o órgão **46000** está presente na lista de órgãos
