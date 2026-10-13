@@ -24,6 +24,9 @@ Três comportamentos da origem justificam o código que existe aqui:
    `publicacoes` traz contratohistorico_id, `empenhos` não traz nenhum id de
    contrato. Por isso `listar_subrecurso` injeta contrato_id a partir da URL da
    chamada — sem isso, parte das entidades ficaria sem como voltar ao contrato.
+   Quando o payload já traz o campo (`itens`), ele é conferido contra a URL em
+   vez de sobrescrito: sobrescrever apontaria, em silêncio, um registro de outro
+   contrato para o contrato consultado.
 """
 
 import logging
@@ -127,7 +130,10 @@ class ClienteContratosGov(ClienteBase):
 
     def listar_subrecurso(self, contrato_id: Any, recurso: str) -> list[dict]:
         """
-        Sub-recurso de um contrato, com contrato_id injetado em toda linha.
+        Sub-recurso de um contrato, com contrato_id em toda linha.
+
+        Linha sem contrato_id recebe o da URL; linha que já o traz mantém o
+        valor da origem e falha se ele divergir da URL (ver `_vincular_contrato`).
 
         `recurso` é o segmento da URL (`historico`, `itens`, `empenhos`...),
         não o nome da entidade do catálogo.
@@ -137,7 +143,7 @@ class ClienteContratosGov(ClienteBase):
             registros = self._listar_tolerando_404(caminho)
         else:
             registros = self._listar(caminho)
-        return [{**r, "contrato_id": contrato_id} for r in registros]
+        return [_vincular_contrato(r, contrato_id, caminho) for r in registros]
 
     def _listar(self, caminho: str) -> list[dict]:
         time.sleep(self.request_delay)
@@ -171,3 +177,20 @@ def _como_lista(resposta: object, caminho: str) -> list[dict]:
         )
         return []
     return [r for r in resposta if isinstance(r, dict)]
+
+
+def _vincular_contrato(registro: dict, contrato_id: Any, caminho: str) -> dict:
+    """Injeta contrato_id da URL ou confere o que a origem já trouxe.
+
+    A comparação é por texto porque a origem devolve int e a URL é montada com
+    o id lido da raw, que pode chegar como str. O valor da origem é mantido
+    quando coincide, para a raw continuar fiel à fonte; a Silver faz o cast.
+    """
+    if registro.get("contrato_id") is None:
+        return {**registro, "contrato_id": contrato_id}
+    if str(registro["contrato_id"]) != str(contrato_id):
+        raise RuntimeError(
+            f"{caminho}: registro com contrato_id divergente da URL "
+            f"({registro['contrato_id']!r} != {contrato_id!r})."
+        )
+    return registro

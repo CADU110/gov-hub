@@ -6,8 +6,8 @@
 # max, em /api/v1/* e /api/v2/*) exigem JWT de usuário e ficam fora — é o que
 # impede a carga incremental e obriga a varredura full por UG.
 #
-# As entidades ainda não têm DAG: cada uma é uma issue filha da feature #15, e
-# `status` vira `ingerido` quando a última fechar. `origem_atual` já aponta para
+# Cada entidade é uma issue filha da feature #15 e ganha DAG quando a issue
+# fecha; `status` vira `ingerido` quando a última fechar. `origem_atual` já aponta para
 # onde `write_raw` vai gravar (backend `warehouse`, ADR-0021), porque é disso
 # que o `sources.yml` da Bronze é gerado.
 #
@@ -19,7 +19,8 @@
 #     por isso as colunas de chave abaixo são os nomes já achatados;
 #   - sub-recurso não traz contrato_id de forma confiável (publicacoes traz
 #     contratohistorico_id, empenhos não traz nenhum dos dois), então o cliente
-#     injeta contrato_id a partir da URL da chamada.
+#     injeta contrato_id a partir da URL da chamada; quando o payload traz o
+#     campo (itens), o cliente o confere contra a URL em vez de sobrescrever.
 
 sistema: contratos_gov
 nome: Contratos.gov.br (Comprasnet Contratos)

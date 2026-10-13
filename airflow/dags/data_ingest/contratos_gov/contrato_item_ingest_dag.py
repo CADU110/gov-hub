@@ -15,7 +15,9 @@ vezes no mesmo comando, e descartar esconderia o caso se ele surgir.
 
 O payload já traz contrato_id; o valor da URL deve coincidir com ele em toda
 linha, e a divergência falha antes da escrita, porque apontaria o item para
-outro contrato.
+outro contrato. Quem detecta é ClienteContratosGov.listar_subrecurso, que
+confere em vez de sobrescrever; _validar_lote repete a conferência como segunda
+barreira, junto da checagem de id.
 
 data_inicio_item não é string: é objeto {date, timezone_type, timezone}
 (serialização do Carbon/PHP). historico_item é lista aninhada de termos. Os

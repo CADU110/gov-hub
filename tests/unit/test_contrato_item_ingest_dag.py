@@ -236,7 +236,11 @@ def test_lote_invalido_falha_antes_da_escrita(
     motivo: str,
 ) -> None:
     """A chave primária é só `id`: id repetido no mesmo comando quebra o
-    ON CONFLICT, e contrato_id divergente apontaria o item para outro contrato."""
+    ON CONFLICT, e contrato_id divergente apontaria o item para outro contrato.
+
+    O cliente é mockado, então o caso divergente exercita só a segunda barreira
+    (_validar_lote); a primeira, no cliente, é coberta em
+    test_cliente_contratos_gov.py."""
     ingerir = task(dagbag, "ingest_contracts")
     cliente = MagicMock()
     cliente.listar_subrecurso.return_value = payload

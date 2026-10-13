@@ -5,7 +5,8 @@ O que estes testes protegem são as três adaptações que o cliente faz sobre a
 forma da origem, e que o resto da ingestão assume como dadas: o achatamento do
 cabeçalho (o catálogo declara colunas que só existem depois dele), a injeção de
 contrato_id nos sub-recursos (sem ela, publicacoes e empenhos não voltam ao
-contrato) e o 404 do domicílio bancário tratado como vazio — e só nele.
+contrato; com o campo no payload, ele é conferido em vez de sobrescrito) e o
+404 do domicílio bancário tratado como vazio — e só nele.
 """
 
 from http import HTTPStatus
@@ -163,6 +164,42 @@ class TestSubrecursos:
 
         assert [p["contrato_id"] for p in publicacoes] == [106156, 106156]
         assert publicacoes[0]["contratohistorico_id"] == 9
+
+    def test_contrato_id_igual_ao_da_url_e_preservado(
+        self, cliente: ClienteContratosGov
+    ) -> None:
+        """itens traz contrato_id como int; a URL é montada com o id da raw, em
+        texto. Mesmo valor em tipos diferentes não é divergência, e a raw fica
+        com o valor da origem."""
+        resposta = _resposta(json_body=[{"id": 31, "contrato_id": 2289}])
+
+        with patch.object(cliente.client, "request", return_value=resposta):
+            itens = cliente.listar_subrecurso("2289", "itens")
+
+        assert itens == [{"id": 31, "contrato_id": 2289}]
+
+    def test_contrato_id_divergente_da_url_falha(
+        self, cliente: ClienteContratosGov
+    ) -> None:
+        """Sobrescrever apontaria o item de outro contrato para o consultado."""
+        resposta = _resposta(json_body=[{"id": 31, "contrato_id": 9999}])
+
+        with (
+            patch.object(cliente.client, "request", return_value=resposta),
+            pytest.raises(RuntimeError, match="contrato_id divergente"),
+        ):
+            cliente.listar_subrecurso(2289, "itens")
+
+    def test_registro_sem_contrato_id_recebe_o_da_url(
+        self, cliente: ClienteContratosGov
+    ) -> None:
+        """empenhos não traz o campo: o vínculo vem só da URL."""
+        resposta = _resposta(json_body=[{"id": 7, "numero": "2024NE000001"}])
+
+        with patch.object(cliente.client, "request", return_value=resposta):
+            empenhos = cliente.listar_subrecurso("2289", "empenhos")
+
+        assert empenhos == [{"id": 7, "numero": "2024NE000001", "contrato_id": "2289"}]
 
     def test_404_no_domicilio_bancario_vira_lista_vazia(
         self, cliente: ClienteContratosGov
