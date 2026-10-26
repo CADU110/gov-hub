@@ -14,6 +14,15 @@ amostra de 2026-09-15): cronograma vazio é caso comum, conta como contrato
 vazio e não interrompe o bloco. As parcelas de um contrato vão numa escrita só,
 não uma por parcela.
 
+O payload já traz contrato_id; o valor da URL deve coincidir com ele em toda
+linha, e a divergência falha antes da escrita, porque apontaria a parcela para
+outro contrato. Quem detecta é ClienteContratosGov.listar_subrecurso, que
+confere em vez de sobrescrever; _validar_lote repete a conferência como segunda
+barreira, junto da checagem de id. Parcela sem id ou com id repetido no mesmo
+lote também interrompe a execução em vez de ser descartada: o ON CONFLICT do
+warehouse recusa a mesma chave duas vezes no mesmo comando, e descartar
+esconderia o caso se ele surgir.
+
 Nenhum campo do payload é objeto ou lista, ao contrário do item, então
 write_raw é chamado sem json_fields. valor chega como texto pt-BR
 ("5.335.214,10") e observacao pode trazer o objeto do termo inteiro: os dois
@@ -57,6 +66,26 @@ default_args = {
     "retries": 3,
     "retry_delay": timedelta(minutes=10),
 }
+
+
+def _validar_lote(contrato_id: str, registros: list[dict]) -> None:
+    """Falha antes da escrita se o lote apontar para outro contrato ou
+    repetir a chave primária."""
+    vistos: set[str] = set()
+    for registro in registros:
+        if str(registro.get("contrato_id")) != contrato_id:
+            raise RuntimeError(
+                f"Contrato {contrato_id}: parcela com contrato_id divergente da URL "
+                f"({registro.get('contrato_id')!r})."
+            )
+        parcela_id = registro.get("id")
+        if parcela_id is None:
+            raise RuntimeError(f"Contrato {contrato_id}: parcela sem id.")
+        if str(parcela_id) in vistos:
+            raise RuntimeError(
+                f"Contrato {contrato_id}: id de parcela {parcela_id!r} repetido no lote."
+            )
+        vistos.add(str(parcela_id))
 
 
 @dag(
@@ -109,6 +138,8 @@ def contrato_cronograma_dag() -> None:
                 vazios += 1
                 logging.info("Contrato %s: nenhuma parcela.", contrato_id)
                 continue
+
+            _validar_lote(contrato_id, registros)
 
             write_raw(
                 SISTEMA,
