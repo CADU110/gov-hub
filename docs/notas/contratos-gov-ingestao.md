@@ -184,7 +184,8 @@ Conferido no backend `warehouse` com as mesmas 80 chamadas: 3.192 linhas na
 raw, 3.192 pares `(contrato_id, id)` distintos, nenhum par da API faltando, e a
 mesma contagem depois de uma segunda execução.
 
-Os demais sub-recursos (#20 a #33) ainda não foram medidos dessa forma.
+Itens e cronograma foram medidos depois (seções abaixo); os demais sub-recursos
+(#20 a #33) ainda não foram medidos dessa forma.
 
 ### Itens: `id` sozinho, objeto de data e histórico aninhado
 
@@ -232,6 +233,55 @@ ao total que a DAG leu da API, amostra igual à API na mesma data (contrato
 depois de uma segunda execução. O `object_storage` (um Parquet por contrato,
 com a data e o histórico preservados) é coberto por
 `test_object_storage_preserva_data_e_historico_aninhados`.
+
+### Cronograma: `id` sozinho, payload plano e contrato vazio frequente
+
+`GET /api/contrato/{contrato_id}/cronograma` responde sem token (200), em
+lista, sem paginação nem filtro de data. Como no item, o payload já traz
+`contrato_id` (como número); a `contrato_cronograma_ingest_dag` compara esse
+valor com o da URL em toda linha e falha antes da escrita se divergirem.
+
+Medição de **2026-10-26** em 50 contratos do órgão 17000 (escopo local; o
+padrão é 46000), com `INGEST_MAX_CONTRATOS=50` no compose:
+
+| Contratos | Com cronograma | Linhas | `id` distintos | `id` em mais de um contrato | Maior cronograma |
+|---|---|---|---|---|---|
+| 50 | 40 | 566 | 566 | 0 | 84 parcelas (contrato 167445) |
+
+Daí as decisões da DAG:
+
+- a chave primária é só `id`, como o catálogo declara: na amostra, nenhum `id`
+  de parcela apareceu em mais de um contrato. Parcela sem `id` ou `id` repetido
+  no mesmo lote interrompe a execução, pelo mesmo motivo do item;
+- cronograma vazio é comum (10 dos 50 contratos): conta como contrato vazio,
+  não grava e não interrompe o bloco;
+- as parcelas de um contrato vão numa escrita só;
+- nenhum campo do payload é objeto ou lista, então `write_raw` é chamado sem
+  `json_fields`.
+
+Particularidades do payload que a Silver precisa tratar (mesma data):
+
+- `valor` é string com formatação brasileira (`"288.988,93"`);
+- `observacao` traz o objeto do termo e chega a 1.429 caracteres na amostra;
+  vai para a raw sem truncamento;
+- `mesref` e `anoref` chegam separados, como números. `vencimento` caiu no mês
+  seguinte ao de referência em todas as 566 linhas (`mesref` 10/2019 →
+  `vencimento` 2019-11-01), então o recorte por período precisa escolher qual
+  dos dois usar: competência ou vencimento;
+- `tipo` diz de qual instrumento vem a parcela (`Contrato`, `Termo Aditivo`,
+  `Termo de Apostilamento`, `Empenho`, `Outros`), e `numero` é o número desse
+  instrumento, não da parcela;
+- `receita_despesa` e `retroativo` vieram constantes na amostra (`Despesa`,
+  `Não`) e são texto, não booleano.
+
+Conferido no backend `warehouse`: 566 linhas na raw e 566 `id` distintos, igual
+ao total que a DAG leu da API. A amostra bate com a API na mesma data: o
+contrato 167433 tem 35 parcelas na raw e na API, os mesmos `id` (51623150 a
+51623186) e a mesma soma de `valor` (9.135.988,61). `dt_ingest` e `contrato_id`
+estão preenchidos em toda linha, e a contagem se mantém depois de uma segunda
+execução (o `dt_ingest` é atualizado pelo upsert). O `object_storage` (um
+Parquet por contrato e por run, com a `observacao` inteira) é coberto por
+`test_cada_contrato_tem_arquivo_proprio_no_object_storage`.
 
 ### Sobre o código do MGI: 46000, não 48000
 
