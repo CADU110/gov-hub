@@ -65,6 +65,55 @@ class TestTiposPreservados:
         )
 
 
+class TestTextosPreservados:
+    """O caso que motivou estes testes é o link_publicacao da contrato_publicacao
+    (#25): texto na maioria das linhas, null em algumas. O json_normalize
+    trocava esse null por NaN, gravado como o texto 'NaN'."""
+
+    def test_nulo_entre_textos_continua_none(self, cliente: ClientPostgresDB) -> None:
+        achatado = cliente._flatten_data(
+            [{"link": "https://www.in.gov.br/x"}, {"link": None}]
+        )
+
+        assert achatado[0]["link"] == "https://www.in.gov.br/x"
+        assert achatado[1]["link"] is None
+
+    def test_texto_vazio_continua_texto_vazio(self, cliente: ClientPostgresDB) -> None:
+        """'' é dado da fonte (publicação importada sem texto); virar NULL apagaria
+        a diferença entre "veio vazio" e "não veio"."""
+        achatado = cliente._flatten_data([{"t": ""}, {"t": None}, {"t": "x"}])
+
+        assert [r["t"] for r in achatado] == ["", None, "x"]
+
+    def test_texto_longo_com_quebras_e_acentos_chega_identico(
+        self, cliente: ClientPostgresDB
+    ) -> None:
+        texto = (
+            "##ATO EXTRATO DE TERMO ADITIVO Nº 5/2023 - UASG 201057\r\n\r\n"
+            "Número do Contrato: 2/2019. \r\n\t'aspas' \"duplas\" — travessão\n"
+        ) * 500
+        achatado = cliente._flatten_data([{"texto_dou": texto}, {"texto_dou": None}])
+
+        assert achatado[0]["texto_dou"] == texto
+        assert len(achatado[0]["texto_dou"]) == len(texto)
+
+    def test_codigo_com_zero_a_esquerda_continua_texto(
+        self, cliente: ClientPostgresDB
+    ) -> None:
+        achatado = cliente._flatten_data([{"codigo": "02000"}, {"codigo": None}])
+
+        assert achatado[0]["codigo"] == "02000"
+
+    def test_texto_nan_vindo_da_fonte_nao_vira_nulo(
+        self, cliente: ClientPostgresDB
+    ) -> None:
+        """A correção é não criar NaN, não apagar o texto 'NaN' que a fonte mande."""
+        achatado = cliente._flatten_data([{"s": "NaN"}, {"s": None}])
+
+        assert achatado[0]["s"] == "NaN"
+        assert achatado[1]["s"] is None
+
+
 class TestFormaDoJsonNormalize:
     def test_objeto_aninhado_une_as_chaves_pelo_separador(
         self, cliente: ClientPostgresDB
