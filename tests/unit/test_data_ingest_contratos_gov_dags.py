@@ -107,6 +107,12 @@ class TestContratosGovDagsIntegrity:
         assert dag.default_args["owner"] == "mgi"
         assert dag.description
 
+    def test_contrato_ocorrencia_tem_metadados_do_dominio(self, dagbag: DagBag) -> None:
+        dag = dagbag.dags["contrato_ocorrencia_ingest_dag"]
+        assert {"sistema:contratos_gov", "dominio:contratacoes"}.issubset(dag.tags)
+        assert dag.default_args["owner"] == "mgi"
+        assert dag.description
+
     def test_unidade_contratante_tem_dominio_organizacional(self, dagbag: DagBag) -> None:
         dag = dagbag.dags["unidade_contratante_ingest_dag"]
         assert "dominio:organizacional" in dag.tags
