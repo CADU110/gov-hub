@@ -286,7 +286,9 @@ entidades:
 
   item_servico:
     descricao: >-
-      Itens da hierarquia do catálogo de serviços.
+      Itens da hierarquia do catálogo de serviços, ativos e inativos. Em
+      object storage, um item inativado mantém a linha ativa antiga: o status
+      atual é o do registro mais recente por dt_ingest.
     granularidade: uma linha por item
     dominio: catalogo
     dag: catalogo_servico_item_ingest_dag
@@ -374,16 +376,6 @@ entidades:
     classificacao: pessoal
     chaves: []
 
-  pesquisa_preco_material_detalhe:
-    descricao: Detalhes de compras associados aos preços de materiais
-    granularidade: uma linha por detalhe de compra de item de material
-    dominio: pesquisa_preco
-    dag: pesquisa_preco_material_ingest_dag
-    origem_atual: compras_gov.raw_pesquisa_preco_material_detalhe
-    chave_primaria: []
-    classificacao: publico
-    chaves: []
-
   pesquisa_preco_servico:
     descricao: Registros de preços consultados para itens do catálogo de serviços
     granularidade: uma linha por registro de preço de serviço
@@ -394,23 +386,14 @@ entidades:
     classificacao: pessoal
     chaves: []
 
-  pesquisa_preco_servico_detalhe:
-    descricao: Detalhes de compras associados aos preços de serviços
-    granularidade: uma linha por detalhe de compra de item de serviço
-    dominio: pesquisa_preco
-    dag: pesquisa_preco_servico_ingest_dag
-    origem_atual: compras_gov.raw_pesquisa_preco_servico_detalhe
-    chave_primaria: []
-    classificacao: publico
-    chaves: []
-
   arp:
     descricao: >-
       Atas de Registro de Preço consultadas no módulo ARP do Compras.gov.br.
     granularidade: uma linha por ata de registro de preço e compra
     dominio: arp
     dag: arp_ingest_dag
-    origem_atual: compras_gov.raw_arp
+    # Tabela Bronze materializada pelo modelo dbt arp a partir dos Parquets.
+    origem_atual: 001_bnz_compras_gov.arp
     chave_primaria: [numeroAtaRegistroPreco, idCompra]
     classificacao: publico
     chaves: []

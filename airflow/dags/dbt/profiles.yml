@@ -17,3 +17,46 @@ gov_bricks:
       schema: "002_slv_default"
       threads: 4
       keepalives_idle: 0
+
+    # Target para ler os Parquets do MinIO com DuckDB e materializar o
+    # resultado no PostgreSQL anexado (mesmo padrão do data-application-cidades).
+    #
+    # Serve só aos nós com tag `duckdb`, que declaram `database` apontando para
+    # o alias `data_warehouse`. Os sources relacionais e a Gold não declaram
+    # database e, aqui, resolveriam para o arquivo DuckDB local, onde essas
+    # tabelas não existem: por isso a DAG do projeto inteiro segue no `dev`.
+    #
+    # `database` não é declarado: o dbt-duckdb o deriva do `path` (govhub_local
+    # para o arquivo padrão, memory para `:memory:`) e recusa os dois divergindo.
+    # As DAGs usam `:memory:`, porque nada de útil fica no arquivo local e ele
+    # teria lock de escrita disputado por tasks paralelas.
+    prod_duckdb:
+      type: duckdb
+      path: "{{ env_var('DUCKDB_GOVHUB_PATH', '/tmp/govhub_local.duckdb') }}"
+      schema: "001_bnz_compras_gov"
+      threads: 2
+      extensions:
+        - httpfs
+        - postgres
+      attach:
+        # Mesmos padrões do target `dev`: dentro do compose o PostgreSQL é o
+        # serviço `postgres`; rodando do host, exporte DBT_HOST=localhost.
+        - path: >-
+            dbname={{ env_var('DBT_DATABASE', 'data_warehouse') }}
+            host={{ env_var('DBT_HOST', 'postgres') }}
+            port={{ env_var('DBT_PORT', '5432') }}
+            user={{ env_var('DBT_USER', 'postgres') }}
+            password={{ env_var('DBT_PASSWORD', 'postgres') }}
+          type: postgres
+          alias: data_warehouse
+      settings:
+        # DuckDB espera host:porta sem http:// neste parâmetro.
+        s3_endpoint: >-
+          {{ env_var('MINIO_ENDPOINT', 'minio:9000')
+             | replace('https://', '')
+             | replace('http://', '')
+             | trim('/') }}
+        s3_access_key_id: "{{ env_var('MINIO_ACCESS_KEY', 'minioadmin') }}"
+        s3_secret_access_key: "{{ env_var('MINIO_SECRET_KEY', 'minioadmin') }}"
+        s3_url_style: path
+        s3_use_ssl: false

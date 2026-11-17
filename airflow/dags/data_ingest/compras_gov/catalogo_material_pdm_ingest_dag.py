@@ -2,11 +2,13 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import dag, task
 
 from batching import page_starts
 from cliente_compras_gov import ClienteComprasGov
-from landing_zone import write_raw
+from estado_catalogo import contar_inativos
+from landing_zone import COLUNA_INGESTAO, RawIndisponivel, read_raw, write_raw
 
 SISTEMA = "compras_gov"
 PAGE_SIZE = 500
@@ -14,6 +16,8 @@ BLOCK_SIZE = 15
 
 ENDPOINT = "/modulo-material/3_consultarPdmMaterial"
 PARAMS = {"statusPdm": "true"}
+PARAMS_INATIVOS = {"statusPdm": "false"}
+DAG_INATIVOS = "catalogo_material_pdm_inativo_ingest_dag"
 ENTIDADE = "pdm_material"
 PK = ["codigopdm"]
 
@@ -32,8 +36,8 @@ default_args = {
     catchup=False,
     default_args=default_args,
     description=(
-        "Ingere PDMs (padrões descritivos de material) do catálogo do Compras.gov.br para "
-        "compras_gov.raw_pdm_material."
+        "Ingere PDMs (padrões descritivos de material) ativos do catálogo do Compras.gov.br para "
+        "compras_gov.raw_pdm_material e dispara a DAG de PDMs inativos quando a raw diverge da API."
     ),
     tags=["sistema:compras_gov", "dominio:material", "orgao:mgi"],
 )
@@ -51,9 +55,7 @@ def catalogo_material_pdm_dag() -> None:
         return page_starts(total, BLOCK_SIZE)
 
     @task(max_active_tis_per_dag=4)
-    def fetch_block(
-        pagina_inicio: int,
-    ) -> dict:
+    def fetch_block(pagina_inicio: int) -> dict:
         api = ClienteComprasGov()
         ingeridos = 0
         api_total = 0
@@ -96,9 +98,38 @@ def catalogo_material_pdm_dag() -> None:
         else:
             logging.info("[%s] Validação OK: ingeridos=%s", ENDPOINT, total_ingerido)
 
+    @task.short_circuit
+    def faltam_inativos() -> bool:
+        api = ClienteComprasGov()
+        _, resp = api.request(
+            "GET", ENDPOINT, params={**PARAMS_INATIVOS, "pagina": 1, "tamanhoPagina": 10}
+        )
+        api_total = resp.get("totalRegistros") if isinstance(resp, dict) else None
+        if api_total is None:
+            raise RuntimeError(
+                f"[{ENDPOINT}] A API não retornou o total de inativos: {resp!r}."
+            )
+        try:
+            dados = read_raw(
+                SISTEMA, ENTIDADE, ["codigoPdm", "statusPdm", COLUNA_INGESTAO]
+            )
+            na_raw = contar_inativos(dados, "codigoPdm", "statusPdm")
+        except RawIndisponivel:
+            na_raw = 0
+        logging.info(
+            "[%s] PDMs inativos: api_total=%s na_raw=%s", ENDPOINT, api_total, na_raw
+        )
+        return na_raw != api_total
+
+    trigger_inativos = TriggerDagRunOperator(
+        task_id="trigger_inativos",
+        trigger_dag_id=DAG_INATIVOS,
+        wait_for_completion=False,
+    )
+
     starts = get_page_starts()
     results = fetch_block.expand(pagina_inicio=starts)
-    validate(results)
+    validate(results) >> faltam_inativos() >> trigger_inativos
 
 
 catalogo_material_pdm_dag()

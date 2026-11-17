@@ -1,19 +1,91 @@
 import logging
-from datetime import datetime, timedelta
+from collections import Counter
+from datetime import date, datetime, timedelta
 from typing import Any
+
 from airflow.sdk import dag, task
 from batching import chunked
 from cliente_compras_gov import ClienteComprasGov
-from landing_zone import distinct_raw_values, write_raw
+from landing_zone import RawIndisponivel, distinct_raw_values, write_raw
 
 SISTEMA = "compras_gov"
 BLOCK_SIZE = 100
+JANELA_DIAS = 14
+LIMITE_REGISTROS = 20_000
+ENDPOINT_PRECO = "/modulo-pesquisa-preco/3_consultarServico"
+ENTIDADE_PRECO = "pesquisa_preco_servico"
+
 default_args = {
     "owner": "mgi",
     "queue": "mgi",
     "retries": 3,
     "retry_delay": timedelta(minutes=5),
 }
+
+
+def _janela(context: dict) -> dict[str, str]:
+    """Filtro de `dataCompra` para os serviços que já estão na raw."""
+    dag_run = context["dag_run"]
+    conf = dag_run.conf or {}
+
+    data_inicial = conf.get("data_inicial")
+    data_final = conf.get("data_final")
+
+    if bool(data_inicial) != bool(data_final):
+        raise ValueError("Informe data_inicial e data_final juntos em dag_run.conf.")
+
+    if data_inicial and data_final:
+        inicio = date.fromisoformat(data_inicial)
+        fim = date.fromisoformat(data_final)
+
+        if fim < inicio:
+            raise ValueError("data_final não pode ser anterior a data_inicial.")
+    else:
+        fallback = dag_run.logical_date or dag_run.run_after
+        fim = (context.get("data_interval_end") or fallback).date()
+        inicio = fim - timedelta(days=JANELA_DIAS)
+
+    return {"dataCompraInicio": inicio.isoformat(), "dataCompraFim": fim.isoformat()}
+
+
+def _gravar(registros: list[dict], metricas: Counter[str]) -> None:
+    """Grava os registros acumulados num Parquet e esvazia a lista."""
+    if registros:
+        write_raw(SISTEMA, ENTIDADE_PRECO, registros)
+        metricas["preco_arquivos"] += 1
+        registros.clear()
+
+
+def _consultar_preco(
+    api: ClienteComprasGov,
+    params: dict[str, Any],
+    acumulados: list[dict],
+    metricas: Counter[str],
+) -> int:
+    recebidos = 0
+    api_total = None
+    registros: list[dict] = []
+    metricas["preco_chamadas"] += 1
+    for pagina, api_total in api.iter_pages(ENDPOINT_PRECO, params):
+        metricas["preco_paginas"] += 1
+        recebidos += len(pagina)
+        registros.extend(registro for registro in pagina if registro)
+        if len(acumulados) + len(registros) >= LIMITE_REGISTROS:
+            _gravar(acumulados, metricas)
+            if len(registros) >= LIMITE_REGISTROS:
+                _gravar(registros, metricas)
+    if api_total is None:
+        raise RuntimeError(
+            f"A API não retornou resposta válida: {ENDPOINT_PRECO} {params}."
+        )
+    if recebidos != api_total:
+        raise RuntimeError(
+            f"Resposta incompleta: {ENDPOINT_PRECO} {params}, "
+            f"recebidos={recebidos}, api_total={api_total}."
+        )
+    acumulados.extend(registros)
+    metricas["preco_recebidos"] += recebidos
+    return recebidos
 
 
 @dag(
@@ -24,98 +96,86 @@ default_args = {
     catchup=False,
     default_args=default_args,
     description=(
-        "Consulta preços e detalhes de serviços já catalogados na API de pesquisa de preço do Compras.gov.br, gravando "
-        "em compras_gov.raw_pesquisa_preco_servico e raw_pesquisa_preco_servico_detalhe."
+        "Consulta preços de serviços, ativos e inativos, com carga incremental na API de pesquisa "
+        "de preço do Compras.gov.br, gravando em compras_gov.raw_pesquisa_preco_servico."
     ),
     tags=["sistema:compras_gov", "dominio:pesquisa_preco", "orgao:mgi"],
 )
 def pesquisa_preco_servico_dag() -> None:
     @task
-    def get_blocos_servico() -> list[list[str]]:
-        itens = distinct_raw_values(SISTEMA, "item_servico", "codigoServico")
-        blocos = chunked(itens, BLOCK_SIZE)
+    def get_lotes_servico(**context: Any) -> list[dict]:
+        janela = _janela(context)
+        try:
+            servicos = distinct_raw_values(SISTEMA, "item_servico", "codigoServico")
+        except Exception as exc:
+            raise RuntimeError(
+                "A entidade 'item_servico' precisa estar na zona raw. Execute "
+                "catalogo_servico_item_ingest_dag antes de pesquisa_preco_servico_ingest_dag."
+            ) from exc
+        if not servicos:
+            raise RuntimeError("Nenhum serviço em compras_gov.raw_item_servico.")
+
+        carregados: set[str] = set()
+        # `is True`: um "false" em texto no conf não pode disparar a carga completa.
+        if (context["dag_run"].conf or {}).get("carga_completa") is True:
+            logging.info("carga_completa em dag_run.conf: a raw de preço é ignorada.")
+        else:
+            try:
+                carregados = set(
+                    distinct_raw_values(SISTEMA, ENTIDADE_PRECO, "codigoItemCatalogo")
+                )
+            except RawIndisponivel:
+                logging.info("%s ainda não está na raw.", ENTIDADE_PRECO)
+
+        novos = [servico for servico in servicos if servico not in carregados]
+        conhecidos = [servico for servico in servicos if servico in carregados]
+        lotes = [
+            {"servicos": lote, "filtro": {}} for lote in chunked(novos, BLOCK_SIZE)
+        ] + [
+            {"servicos": lote, "filtro": janela}
+            for lote in chunked(conhecidos, BLOCK_SIZE)
+        ]
         logging.info(
-            "Pesquisa de preços serviço: %s itens em %s blocos de até %s",
-            len(itens),
-            len(blocos),
+            "Pesquisa de preços serviço: %s serviços, %s pelo histórico completo, "
+            "%s pela janela %s, em %s lotes de até %s",
+            len(servicos),
+            len(novos),
+            len(conhecidos),
+            janela,
+            len(lotes),
             BLOCK_SIZE,
         )
-        return blocos
+        return lotes
 
-    @task(max_active_tis_per_dag=4)
-    def fetch_preco_servico(lote: list[str]) -> dict:
+    @task(max_active_tis_per_dag=2)
+    def fetch_preco_servico(lote: dict) -> dict:
         api = ClienteComprasGov()
-        total_preco = 0
-        total_detalhe = 0
-        for codigo_item in lote:
-            registros_preco = 0
-            api_total_preco = None
-            for batch, api_total_preco in api.iter_pages(
-                "/modulo-pesquisa-preco/3_consultarServico",
-                {"codigoItemCatalogo": codigo_item},
-            ):
-                write_raw(
-                    SISTEMA,
-                    "pesquisa_preco_servico",
-                    batch,
-                )
-                registros_preco += len(batch)
-            if api_total_preco is None:
-                raise RuntimeError(
-                    f"A API não retornou resposta válida (preço): item={codigo_item}."
-                )
-            if registros_preco != api_total_preco:
-                raise RuntimeError(
-                    f"Resposta incompleta (preço): item={codigo_item}, "
-                    f"gravados={registros_preco}, api_total={api_total_preco}."
-                )
-            total_preco += registros_preco
+        filtro = lote["filtro"]
+        metricas: Counter[str] = Counter(servicos=len(lote["servicos"]))
+        acumulados: list[dict] = []
 
-            registros_detalhe = 0
-            api_total_detalhe = None
-            for batch, api_total_detalhe in api.iter_pages(
-                "/modulo-pesquisa-preco/4_consultarServicoDetalhe",
-                {"codigoItemCatalogo": codigo_item},
-            ):
-                write_raw(
-                    SISTEMA,
-                    "pesquisa_preco_servico_detalhe",
-                    batch,
-                )
-                registros_detalhe += len(batch)
-            if api_total_detalhe is None:
-                raise RuntimeError(
-                    f"A API não retornou resposta válida (detalhe): item={codigo_item}."
-                )
-            if registros_detalhe != api_total_detalhe:
-                raise RuntimeError(
-                    f"Resposta incompleta (detalhe): item={codigo_item}, "
-                    f"gravados={registros_detalhe}, api_total={api_total_detalhe}."
-                )
-            total_detalhe += registros_detalhe
-
-            logging.info(
-                "Item %s: preco=%s detalhe=%s",
-                codigo_item,
-                registros_preco,
-                registros_detalhe,
+        for codigo_servico in lote["servicos"]:
+            recebidos = _consultar_preco(
+                api,
+                {"codigoItemCatalogo": codigo_servico, **filtro},
+                acumulados,
+                metricas,
             )
-        return {"preco": total_preco, "detalhe": total_detalhe}
+            if recebidos:
+                metricas["servicos_com_preco"] += 1
+        _gravar(acumulados, metricas)
+
+        logging.info("Lote %s: %s", filtro or "histórico completo", dict(metricas))
+        return dict(metricas)
 
     @task
     def validate(results: Any) -> None:
-        total_preco = sum(r["preco"] for r in results)
-        total_detalhe = sum(r["detalhe"] for r in results)
-        logging.info(
-            "Pesquisa preço serviço: blocos=%s preco=%s detalhe=%s",
-            len(results),
-            total_preco,
-            total_detalhe,
-        )
+        total: Counter[str] = Counter()
+        for metricas in results:
+            total.update(metricas)
+        logging.info("Pesquisa preço serviço: blocos=%s %s", len(results), dict(total))
 
-    blocos = get_blocos_servico()
-    results = fetch_preco_servico.expand(lote=blocos)
-    validate(results)
+    validate(fetch_preco_servico.expand(lote=get_lotes_servico()))
 
 
 pesquisa_preco_servico_dag()

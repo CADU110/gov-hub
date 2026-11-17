@@ -81,7 +81,8 @@ de relatório).
 
 | Módulo | O que faz |
 |---|---|
-| `landing_zone.py` | `build_landing_path`, `write_parquet`, `read_parquet`, `list_files` |
+| `estado_catalogo.py` | `contar_inativos`: códigos de catálogo cujo registro mais recente na raw está inativo |
+| `landing_zone.py` | `build_landing_path`, `write_parquet`, `read_parquet`, `list_files`, `asset_raw` (Asset da raw que aciona a transformação, [ADR-0022](docs/adr/0022-transformacao-parquet-com-duckdb-e-assets.md)) |
 | `contratos_gov_scope.py` | Escopo de detalhamento do Contratos.gov.br: lê a Variable `contratos_gov_escopo_orgaos` e devolve os ids de contrato da raw para as DAGs de sub-recurso |
 | `homologation_helpers.py` | Checks de qualidade em Polars (`not_null`, `schema`, `row_count`, `no_duplicates`, `null_rate`) |
 | `homologation_flow.py` | Fluxo landing zone → validação → Postgres |
@@ -162,6 +163,12 @@ por teste**, com as dependências herdadas dos próprios `ref()`.
 Na prática isso significa que um modelo Gold que falha não obriga a reprocessar
 a Silver inteira no retry, e que acrescentar um modelo ao projeto dbt não exige
 mudança nenhuma no arquivo da DAG.
+
+Os modelos que leem a raw em Parquet (hoje, a ARP) levam a tag dbt `duckdb` e
+ficam fora dessa DAG. Eles rodam na `duckdb_{orgao}_transform_dag`, em que o
+DuckDB lê o object storage e grava no PostgreSQL anexado. Essa DAG é acionada
+pelos Assets que as DAGs de ingestão emitem ao terminar
+([ADR-0022](docs/adr/0022-transformacao-parquet-com-duckdb-e-assets.md)).
 
 > Os pacotes locais em `packages.yml` são referenciados via
 > `{{ env_var('GOV_BRICKS_DBT_DIR', '..') }}` porque o Cosmos renderiza o projeto
@@ -259,6 +266,8 @@ make superset   # http://localhost:8088 (admin/admin) + connection no Airflow
 
 Leia o [Guia de Contribuição](.github/CONTRIBUTING.md) e o
 [Protocolo de Aprovação de Pull Requests](.github/MERGE_REQUEST_PROTOCOL.md).
+Para dúvidas e ideias ainda em discussão, use as [Discussions](https://github.com/GovHub-br/gov-hub/discussions);
+para bugs e tarefas com escopo definido, abra uma [issue](https://github.com/GovHub-br/gov-hub/issues).
 Commits e títulos de PR seguem [Conventional Commits](.github/TEMPLATES/COMMIT_TEMPLATE.md).
 A revisão obrigatória por pasta é definida em [`.github/CODEOWNERS`](.github/CODEOWNERS).
 

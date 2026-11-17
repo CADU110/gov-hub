@@ -2,11 +2,13 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import dag, task
 
 from batching import page_starts
 from cliente_compras_gov import ClienteComprasGov
-from landing_zone import write_raw
+from estado_catalogo import contar_inativos
+from landing_zone import COLUNA_INGESTAO, RawIndisponivel, read_raw, write_raw
 
 SISTEMA = "compras_gov"
 PAGE_SIZE = 500
@@ -14,6 +16,8 @@ BLOCK_SIZE = 15
 
 ENDPOINT = "/modulo-material/4_consultarItemMaterial"
 PARAMS = {"statusItem": "true"}
+PARAMS_INATIVOS = {"statusItem": "false"}
+DAG_INATIVOS = "catalogo_material_item_inativo_ingest_dag"
 ENTIDADE = "item_material"
 PK = ["codigoitem"]
 
@@ -31,7 +35,10 @@ default_args = {
     start_date=datetime(2024, 1, 1),
     catchup=False,
     default_args=default_args,
-    description="Ingere itens de materiais do catálogo do Compras.gov.br para compras_gov.raw_item_material.",
+    description=(
+        "Ingere itens de materiais ativos do catálogo do Compras.gov.br para compras_gov.raw_item_material "
+        "e dispara a DAG de itens inativos quando a raw diverge da API."
+    ),
     tags=["sistema:compras_gov", "dominio:material", "orgao:mgi"],
 )
 def catalogo_material_item_dag() -> None:
@@ -91,9 +98,38 @@ def catalogo_material_item_dag() -> None:
         else:
             logging.info("[%s] Validação OK: ingeridos=%s", ENDPOINT, total_ingerido)
 
+    @task.short_circuit
+    def faltam_inativos() -> bool:
+        api = ClienteComprasGov()
+        _, resp = api.request(
+            "GET", ENDPOINT, params={**PARAMS_INATIVOS, "pagina": 1, "tamanhoPagina": 10}
+        )
+        api_total = resp.get("totalRegistros") if isinstance(resp, dict) else None
+        if api_total is None:
+            raise RuntimeError(
+                f"[{ENDPOINT}] A API não retornou o total de inativos: {resp!r}."
+            )
+        try:
+            dados = read_raw(
+                SISTEMA, ENTIDADE, ["codigoItem", "statusItem", COLUNA_INGESTAO]
+            )
+            na_raw = contar_inativos(dados, "codigoItem", "statusItem")
+        except RawIndisponivel:
+            na_raw = 0
+        logging.info(
+            "[%s] itens inativos: api_total=%s na_raw=%s", ENDPOINT, api_total, na_raw
+        )
+        return na_raw != api_total
+
+    trigger_inativos = TriggerDagRunOperator(
+        task_id="trigger_inativos",
+        trigger_dag_id=DAG_INATIVOS,
+        wait_for_completion=False,
+    )
+
     starts = get_page_starts()
     results = fetch_block.expand(pagina_inicio=starts)
-    validate(results)
+    validate(results) >> faltam_inativos() >> trigger_inativos
 
 
 catalogo_material_item_dag()

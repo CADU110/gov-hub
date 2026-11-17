@@ -1,10 +1,8 @@
 # GERADO por `make modelo` a partir de catalogo/sistemas/compras_gov.yml — não edite à mão.
 #
-# A Bronze não é materializada por dbt: ela é um source sobre a zona raw,
-# onde a ingestão entrega o dado (ADR-0006, ADR-0017, ADR-0021).
-#
-# Esta é a forma de tabela, do backend `warehouse`. Em um deployment com a
-# raw em object storage, o source aponta para os arquivos da entidade.
+# Fontes relacionais descritas por origem_atual no catálogo.
+# Tabelas raw mantêm o source do sistema; a Bronze materializada
+# usa o source <sistema>_bronze, sem alterar a ingestão.
 
 version: 2
 
@@ -21,15 +19,6 @@ sources:
       sistema_origem: compras_gov
       camada: bronze
     tables:
-      - name: arp
-        identifier: raw_arp
-        description: >
-            Atas de Registro de Preço consultadas no módulo ARP do Compras.gov.br.
-            Granularidade: uma linha por ata de registro de preço e compra.
-        meta:
-          classificacao: publico
-          dag_ingestao: arp_ingest_dag
-
       - name: arp_adesoes_item
         identifier: raw_arp_adesoes_item
         description: >
@@ -174,8 +163,9 @@ sources:
       - name: item_servico
         identifier: raw_item_servico
         description: >
-            Itens da hierarquia do catálogo de serviços. Granularidade: uma linha por
-            item.
+            Itens da hierarquia do catálogo de serviços, ativos e inativos. Em object
+            storage, um item inativado mantém a linha ativa antiga: o status atual é o
+            do registro mais recente por dt_ingest. Granularidade: uma linha por item.
         meta:
           classificacao: publico
           dag_ingestao: catalogo_servico_item_ingest_dag
@@ -222,6 +212,15 @@ sources:
           classificacao: publico
           dag_ingestao: orgao_ingest_dag
 
+      - name: pdm_material
+        identifier: raw_pdm_material
+        description: >
+            Padrões descritivos de material (PDM) da hierarquia do catálogo de
+            materiais. Granularidade: uma linha por PDM.
+        meta:
+          classificacao: publico
+          dag_ingestao: catalogo_material_pdm_ingest_dag
+
       - name: pesquisa_preco_material
         identifier: raw_pesquisa_preco_material
         description: >
@@ -229,15 +228,6 @@ sources:
             Granularidade: uma linha por registro de preço de material.
         meta:
           classificacao: pessoal
-          dag_ingestao: pesquisa_preco_material_ingest_dag
-
-      - name: pesquisa_preco_material_detalhe
-        identifier: raw_pesquisa_preco_material_detalhe
-        description: >
-            Detalhes de compras associados aos preços de materiais Granularidade: uma
-            linha por detalhe de compra de item de material.
-        meta:
-          classificacao: publico
           dag_ingestao: pesquisa_preco_material_ingest_dag
 
       - name: pesquisa_preco_servico
@@ -248,23 +238,6 @@ sources:
         meta:
           classificacao: pessoal
           dag_ingestao: pesquisa_preco_servico_ingest_dag
-
-      - name: pesquisa_preco_servico_detalhe
-        identifier: raw_pesquisa_preco_servico_detalhe
-        description: >
-            Detalhes de compras associados aos preços de serviços Granularidade: uma
-            linha por detalhe de compra de item de serviço.
-        meta:
-          classificacao: publico
-          dag_ingestao: pesquisa_preco_servico_ingest_dag
-      - name: pdm_material
-        identifier: raw_pdm_material
-        description: >
-            Padrões descritivos de material (PDM) da hierarquia do catálogo de
-            materiais. Granularidade: uma linha por PDM.
-        meta:
-          classificacao: publico
-          dag_ingestao: catalogo_material_pdm_ingest_dag
 
       - name: pgc_agregacao
         identifier: raw_pgc_agregacao
@@ -351,3 +324,25 @@ sources:
         meta:
           classificacao: publico
           dag_ingestao: catalogo_material_unidade_fornecimento_ingest_dag
+
+  - name: compras_gov_bronze
+    schema: 001_bnz_compras_gov
+    database: "{{ 'data_warehouse' if target.type == 'duckdb' else env_var('DBT_DATABASE', 'data_warehouse') }}"
+    description: >
+      Camada Bronze de Compras.gov.br (SIASG): dado fiel à fonte, gravado pelo
+      dbt. Sistema estruturante de compras e contratações do governo federal.
+      Expõe API pública de consulta a órgãos, UASGs, fornecedores, contratos,
+      contratações e catálogos de material e serviço.
+    meta:
+      owner: "@GovHub-br/oss"
+      sistema_origem: compras_gov
+      camada: bronze
+    tables:
+      - name: arp
+        identifier: arp
+        description: >
+            Atas de Registro de Preço consultadas no módulo ARP do Compras.gov.br.
+            Granularidade: uma linha por ata de registro de preço e compra.
+        meta:
+          classificacao: publico
+          dag_ingestao: arp_ingest_dag

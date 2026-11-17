@@ -6,7 +6,7 @@ from airflow.sdk import dag, task
 
 from batching import page_starts
 from cliente_compras_gov import ClienteComprasGov
-from landing_zone import write_raw
+from landing_zone import asset_raw, write_raw
 
 SISTEMA = "compras_gov"
 PAGE_SIZE = 500
@@ -38,7 +38,7 @@ def _get_intervalo(context: dict) -> tuple[str, str]:
     start_date=datetime(2024, 1, 1),
     catchup=False,
     default_args=default_args,
-    description="Ingere Atas de Registro de Preço (ARP) da API do Compras.gov.br para a tabela compras_gov.raw_arp.",
+    description="Ingere Atas de Registro de Preço (ARP) da API do Compras.gov.br na zona raw (compras_gov/arp).",
     tags=["sistema:compras_gov", "dominio:arp", "orgao:mgi"],
 )
 def arp_dag() -> None:
@@ -97,7 +97,9 @@ def arp_dag() -> None:
                 break
         return {"ingeridos": ingeridos, "api_total": api_total}
 
-    @task
+    # Só roda depois de todos os lotes: é ela que avisa a duckdb_<orgao>_transform_dag
+    # que a raw do dia está completa. Lote que falha não dispara a transformação.
+    @task(outlets=[asset_raw(SISTEMA, ENTIDADE)])
     def validate(results: Any) -> None:
         total_ingerido = sum(r["ingeridos"] for r in results)
         api_total = results[0]["api_total"] if results else 0
