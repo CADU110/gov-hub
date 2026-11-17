@@ -233,6 +233,61 @@ depois de uma segunda execução. O `object_storage` (um Parquet por contrato,
 com a data e o histórico preservados) é coberto por
 `test_object_storage_preserva_data_e_historico_aninhados`.
 
+### Ocorrências: `id` sozinho, estrutura vista só no código-fonte
+
+`GET /api/contrato/{contrato_id}/ocorrencias` responde sem token, em lista, sem
+paginação nem filtro de data. A `contrato_ocorrencia_ingest_dag` faz uma chamada
+por contrato do escopo, e o recorte temporal fica para a Silver, pelo campo
+`data`.
+
+Nenhuma ocorrência real foi observada. Todas as chamadas das três amostras
+abaixo responderam `200 []`, sem erro HTTP:
+
+| Data | Amostra | Chamadas | Com ocorrência |
+|---|---|---|---|
+| 2026-11-16 | contratos da UG 201057 (órgão 46000) | 40 | 0 |
+| 2026-11-17 | DagRun manual da DAG no compose, escopo local no órgão 17000, `INGEST_MAX_CONTRATOS=50`, 2 blocos | 50 | 0 |
+| 2026-11-17 | sondagem com o cliente da DAG: sorteio de 220 contratos ativos e 80 inativos da raw local (órgãos 17000, 11000, 02000 e 13000), intervalo mínimo de 1 segundo entre chamadas, sem retentativa | 300 | 0 |
+
+As contagens não devem ser somadas como contratos distintos: 18 dos 50
+contratos da DagRun também estão entre os 300 da sondagem, conferido pelos ids
+registrados nas duas execuções.
+
+Sem dado real, a estrutura foi conferida no código-fonte público
+(`Contratoocorrencia::ocorrenciaAPI`, em gitlab.com/comprasnet/contratos) e no
+schema `Ocorrencias` da spec OpenAPI. Daí as decisões da DAG:
+
+- a chave primária é só `id`. Na migration, `id` é a chave da tabela
+  `contratoocorrencias`, e a consulta filtra por `contrato_id` direto nessa
+  tabela, sem a tabela de vínculo que faz o mesmo empenho aparecer em vários
+  contratos. É evidência de código, não de dado: a unicidade ainda precisa ser
+  confirmada numa ocorrência real;
+- o payload traz `contrato_id`, conferido contra a URL no cliente e de novo na
+  DAG. Divergência, linha sem `id` ou `id` repetido com conteúdo diferente
+  interrompem a execução antes da escrita; cópia idêntica é descartada com
+  aviso, porque o upsert do `warehouse` recusa a mesma chave duas vezes no mesmo
+  comando;
+- `arquivos` é lista de objetos: vai como JSON no `warehouse` e como objeto
+  nativo no `object_storage`;
+- a entidade é classificada como `pessoal`. O payload identifica quem registrou
+  a ocorrência (nome completo e CPF parcial, pela mesma função de mascaramento
+  usada em `contrato_preposto` e `contrato_responsavel`) e traz o e-mail do
+  preposto notificado.
+
+Como nenhuma chamada devolveu linha, nada foi gravado:
+`contratos_gov.raw_contrato_ocorrencia` não existe no `warehouse` local
+(conferido em 2026-11-17), e a Bronze não tem o que ler. É o esperado: a tabela
+só nasce na primeira execução que encontrar ocorrência, e o `validate` registra
+a ausência no log em vez de falhar. O caminho não vazio é coberto só pelos
+testes unitários, com fixture sintética montada a partir dos exemplos da
+OpenAPI.
+
+Fica para a homologação, na primeira ocorrência real: confirmar que `id` não se
+repete entre contratos, comparar a raw com a API na mesma data (`contrato_id`,
+`dt_ingest` e os campos do payload), conferir a forma de `arquivos` e a
+classificação, e repetir a execução para verificar que o upsert não duplica
+linhas.
+
 ### Sobre o código do MGI: 46000, não 48000
 
 Na API do Contratos.gov.br, o órgão **46000** está presente na lista de órgãos
@@ -253,6 +308,8 @@ ADR-0019/0020). Fica o dado para quem for fechar a pendência.
 - **Comportamento sob varredura completa.** Nunca observado. Ver a ressalva da
   decisão de concorrência.
 - **Estrutura das entidades da Fase 4.** `contrato_terceirizado`,
-  `contrato_despesa_acessoria`, `contrato_ocorrencia` e
-  `contrato_domicilio_bancario` vieram vazias em toda a amostra: a chave primária
-  declarada no catálogo para elas é hipótese, a confirmar ao implementar a DAG.
+  `contrato_despesa_acessoria` e `contrato_domicilio_bancario` vieram vazias em
+  toda a amostra: a chave primária declarada no catálogo para elas é hipótese, a
+  confirmar ao implementar a DAG. `contrato_ocorrencia` já tem DAG, e a chave
+  `[id]` tem evidência no código-fonte (ver "Ocorrências", acima); falta
+  confirmá-la em dado real, na homologação.

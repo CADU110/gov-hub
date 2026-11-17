@@ -5,7 +5,7 @@ GET /api/contrato/{contrato_id}/ocorrencias não pagina nem filtra por data: a
 na Silver, pelo campo data. Os contratos vêm das raws de ativos e inativos,
 filtrados pelo órgão consumidor (Variable contratos_gov_escopo_orgaos). Uma
 chamada por contrato é inevitável; expandir uma task por ID excederia o
-core.max_map_length, então o Airflow expande apenas blocos (ADR-0021).
+core.max_map_length, então o Airflow expande apenas blocos (batching.py).
 
 Entidade da fase 4: a API devolveu 200 [] em todos os contratos consultados,
 então a estrutura não foi vista em dado real. Ela vem do código-fonte público
