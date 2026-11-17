@@ -289,15 +289,30 @@ entidades:
 
   contrato_ocorrencia:
     descricao: >-
-      Ocorrências registradas na execução do contrato.
+      Ocorrências registradas na execução do contrato. A origem entrega o usuário
+      que registrou a ocorrência (nome completo e CPF parcial) e o e-mail do
+      preposto notificado.
     granularidade: uma linha por ocorrência registrada em um contrato
     dominio: contratacoes
     dag: contrato_ocorrencia_ingest_dag
     origem_atual: contratos_gov.raw_contrato_ocorrencia
     chave_primaria: [id]
-    classificacao: publico
+    classificacao: pessoal
     chaves: []
-    # Fase 4: mesma ressalva de contrato_terceirizado — estrutura não observada.
+    # Fase 4: a API devolveu 200 [] nos 40 contratos da UG 201057 (órgão 46000)
+    # consultados em 2026-11-16, então a estrutura não foi observada em dado
+    # real. Ela foi conferida no código-fonte público (gitlab.com/comprasnet/
+    # contratos, Contratoocorrencia::ocorrenciaAPI) e no schema `Ocorrencias` da
+    # spec OpenAPI: id, contrato_id, numero, usuario, data, ocorrencia,
+    # notificapreposto, emailpreposto, numeroocorrencia, novasituacao, situacao
+    # e arquivos (lista de objetos).
+    # - chave_primaria [id]: `id` é a chave da tabela contratoocorrencias, e a
+    #   consulta filtra por contrato_id direto nela, sem tabela de vínculo —
+    #   ao contrário de empenhos, o mesmo id não aparece em dois contratos.
+    # - classificacao pessoal: `usuario` sai da mesma função
+    #   (usuarioTransparencia) que mascara prepostos e responsáveis, com nome
+    #   completo e CPF parcial, e `emailpreposto` é e-mail de pessoa física.
+    # Confirmar ambas quando a primeira ocorrência real for ingerida.
 
   contrato_domicilio_bancario:
     descricao: >-
