@@ -65,10 +65,13 @@ sources:
       - name: contrato_domicilio_bancario
         identifier: raw_contrato_domicilio_bancario
         description: >
-            Domicílio bancário do contrato — banco, agência e conta do pagamento.
-            Granularidade: uma linha por domicílio bancário de um contrato.
+            Domicílio bancário do contrato registrado pelo AntecipaGov: unidade gestora
+            e número do contrato e, em domiciliosbancarios, as operações de crédito do
+            fornecedor, cada uma com situação, banco, agência, conta e código da
+            operação. Granularidade: uma linha por contrato com domicílio bancário
+            registrado pelo AntecipaGov, com as operações em domiciliosbancarios.
         meta:
-          classificacao: publico
+          classificacao: pessoal
           dag_ingestao: contrato_domicilio_bancario_ingest_dag
 
       - name: contrato_empenho

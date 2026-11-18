@@ -316,14 +316,35 @@ entidades:
 
   contrato_domicilio_bancario:
     descricao: >-
-      Domicílio bancário do contrato — banco, agência e conta do pagamento.
-    granularidade: uma linha por domicílio bancário de um contrato
+      Domicílio bancário do contrato registrado pelo AntecipaGov: unidade
+      gestora e número do contrato e, em domiciliosbancarios, as operações de
+      crédito do fornecedor, cada uma com situação, banco, agência, conta e
+      código da operação.
+    granularidade: >-
+      uma linha por contrato com domicílio bancário registrado pelo AntecipaGov,
+      com as operações em domiciliosbancarios
     dominio: contratacoes
     dag: contrato_domicilio_bancario_ingest_dag
     origem_atual: contratos_gov.raw_contrato_domicilio_bancario
-    chave_primaria: [id]
-    classificacao: publico
+    chave_primaria: [contrato_id]
+    classificacao: pessoal
     chaves: []
-    # Fase 4: mesma ressalva de contrato_terceirizado — estrutura não observada.
-    # É também o único recurso que responde 404 {"error"} em vez de 200 [] quando
-    # não há dado; cliente_contratos_gov traduz esse 404 para lista vazia.
+    # Fase 4: em 2026-11-17, 40 contratos da raw local responderam 404 "Contrato
+    # sem domicílio bancário registrado pelo AntecipaGov.", então a estrutura não
+    # foi vista em dado real. Ela vem do schema `DomicilioBancario` da OpenAPI e
+    # de ContratoController::operacoesDomicilioBancarioPorContrato
+    # (gitlab.com/comprasnet/contratos): a resposta é UM objeto por contrato,
+    # {unidade_gestora, contrato_id, contrato, domiciliosbancarios: [...]}, e não
+    # lista; a ausência é 404 {"error"}, que o cliente traduz para None.
+    # - granularidade e chave [contrato_id]: a raw guarda o objeto como veio,
+    #   com domiciliosbancarios em JSON, sem explodir a lista. Cada id da lista é
+    #   o de uma operação AntecipaGov, ligada aos contratos pela tabela
+    #   contrato_antecipagov, sem restrição de unicidade; o registro da operação
+    #   recebe id_contrato como array, então o mesmo id pode estar em vários
+    #   contratos. [id] reduziria esses vínculos a uma linha. Explodir a lista e
+    #   deduplicar por (contrato_id, id) é papel da Silver.
+    # - classificacao pessoal: banco, agência e conta são do fornecedor, que
+    #   pode ser pessoa física (30 dos 1.718 contratos da raw local, em
+    #   2026-11-17); conta bancária de pessoa física é dado pessoal.
+    # Confirmar formato, chave e unicidade quando o primeiro domicílio real for
+    # ingerido (docs/notas/contratos-gov-ingestao.md).
