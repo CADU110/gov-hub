@@ -109,10 +109,11 @@ def _validar_domicilio(contrato_id: str, domicilio: dict) -> int:
             raise RuntimeError(
                 f"Contrato {contrato_id}: operação de domicílio bancário sem id."
             )
-        anterior = vistas.setdefault(str(operacao["id"]), operacao)
-        if anterior is operacao:
+        chave = str(operacao["id"])
+        if chave not in vistas:
+            vistas[chave] = operacao
             continue
-        if anterior != operacao:
+        if vistas[chave] != operacao:
             raise RuntimeError(
                 f"Contrato {contrato_id}: id de operação {operacao['id']!r} "
                 "repetido com conteúdo diferente."

@@ -466,6 +466,20 @@ def test_operacao_identica_repetida_e_mantida_e_contada(
     assert "mantida(s) como a fonte entregou" in caplog.text
 
 
+def test_repeticao_e_contada_pelo_id_e_nao_pela_identidade_do_objeto(
+    dagbag: DagBag, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O mesmo objeto duas vezes na lista também é repetição: o critério é o
+    id já visto, não ser outra instância de dict."""
+    ingerir = task(dagbag, "ingest_contracts")
+    operacao = copy.deepcopy(OPERACAO_REGISTRADA)
+    preparar_ingestao(
+        ingerir, monkeypatch, [domicilio(domiciliosbancarios=[operacao, operacao])]
+    )
+
+    assert ingerir(["115"])["operacoes_repetidas"] == 1
+
+
 def test_lista_vazia_com_200_e_gravada_com_aviso(
     dagbag: DagBag, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
