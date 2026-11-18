@@ -288,6 +288,118 @@ repete entre contratos, comparar a raw com a API na mesma data (`contrato_id`,
 classificação, e repetir a execução para verificar que o upsert não duplica
 linhas.
 
+### Domicílio bancário: objeto por contrato, chave `contrato_id`
+
+`GET /api/contrato/{contrato_id}/domiciliobancario` responde sem token, sem
+paginação nem filtro de data, mas foge das convenções dos demais sub-recursos
+em dois pontos, e a `contrato_domicilio_bancario_ingest_dag` (issue #33) não
+copia a de ocorrências neles:
+
+- **a resposta de sucesso é um objeto, não lista.** O texto da feature #15 e da
+  issue #33 previa "resposta sempre em lista"; o schema `DomicilioBancario` da
+  spec OpenAPI e o código-fonte
+  (`ContratoController::operacoesDomicilioBancarioPorContrato` e
+  `formataOperacoesDomicilioBancario`, em gitlab.com/comprasnet/contratos)
+  descrevem um objeto `{unidade_gestora, contrato_id, contrato,
+  domiciliosbancarios: [...]}`, em que cada elemento da lista é uma operação
+  AntecipaGov (`id`, `situacao`, `banco`, `agencia`, `conta_bancaria`,
+  `codigo_operacao_credito`, `data_registro`, `updated_at`);
+- **a ausência é 404, com duas mensagens.** "Contrato sem domicílio bancário
+  registrado pelo AntecipaGov." quando o contrato não tem operação, e "Contrato
+  não localizado." quando o contrato não existe (inclusive apagado, porque o
+  modelo usa *soft delete*).
+
+Até esta issue, o cliente tratava qualquer 404 desse endpoint como vazio e
+degradava para `[]` toda resposta que não fosse lista. Com o formato
+documentado, um contrato **com** domicílio seria gravado como "sem domicílio",
+sem erro nem aviso. O cliente ganhou `consultar_domicilio_bancario`, que
+devolve o objeto como veio ou `None`; `listar_subrecurso` passou a recusar o
+recurso.
+
+Sondagem de **2026-11-17**, entre 21:25 e 21:27 (UTC−3), sem gravação, com
+`httpx` direto (sem retentativa) e intervalo mínimo de 1 s entre chamadas. A
+sondagem registrou só a forma das respostas, sem nenhum valor bancário:
+
+| Amostra | Chamadas | Resultado |
+|---|---|---|
+| 30 ativos e 10 inativos da raw local (órgãos 17000, 11000 e 02000), sorteio determinístico por `md5(id)` | 40 | todas `404` "sem domicílio", 0,54–0,86 s (mediana 0,84 s) |
+| id inexistente (`999999999`) | 1 | `404` "Contrato não localizado." |
+| `/api/contrato/id/{id}`, um contrato por UG local | 10 | `200`, sem o campo `utiliza_antecipagov` |
+
+Nenhuma resposta `5xx`, nenhum timeout, nenhuma retentativa; 51 chamadas em
+90,5 s no total. Uma DagRun local da DAG, logo depois (abaixo), consultou mais
+50 contratos, dos quais 2 já estavam na sondagem: 88 contratos distintos, todos
+sem domicílio. A amostra é pequena e concentrada em poucos órgãos, e não diz
+nada sobre a frequência de domicílios no órgão 46000.
+
+Daí as decisões da DAG:
+
+- **granularidade: uma linha por contrato**, com o objeto da fonte inteiro e
+  `domiciliosbancarios` como JSON no `warehouse` (`json_fields`; sem ele, o
+  cliente de banco gravaria o `repr` Python da lista) e como lista de struct no
+  `object_storage`. Nada é achatado nem explodido na raw, e a Silver explode a
+  lista;
+- **chave primária `contrato_id`**, e não `id`. O `id` da lista é o da operação
+  na tabela `antecipagov`, ligada aos contratos por `contrato_antecipagov`, sem
+  restrição de unicidade, e o registro de uma operação recebe `id_contrato` como
+  *array* (`RegistrarAntecipagovRequest`, `AntecipaGovTrait::salvarRequest`): a
+  mesma operação pode aparecer em vários contratos, como os empenhos. Com `[id]`,
+  o upsert reduziria esses vínculos a uma linha. Com `[contrato_id]`, a
+  reexecução troca o objeto inteiro, e uma operação removida na fonte não sobra
+  na raw do `warehouse`. Na Silver, a linha explodida tem chave
+  `(contrato_id, id)`;
+- **"Contrato não localizado."** é contado e avisado com os ids, sem derrubar o
+  bloco: no `object_storage` a raw de cabeçalhos é append-only, e um contrato
+  apagado na fonte continuaria nela para sempre. Se **nenhum** contrato da
+  execução for localizado, o `validate` falha, porque isso indica raw e API de
+  ambientes diferentes. Qualquer outro 404, `5xx`, `401`, `429` ou timeout
+  esgotado falha a task;
+- **operação repetida** com conteúdo idêntico é mantida e contada (a raw guarda
+  o objeto da fonte, e o vínculo aceita o mesmo par duas vezes); o mesmo `id` com
+  conteúdo diferente falha antes da escrita;
+- **texto continua texto**: `banco`, `agencia`, `conta_bancaria`,
+  `codigo_operacao_credito` e `unidade_gestora` são `string` na OpenAPI, os
+  quatro primeiros são colunas de texto nas migrations de `domicilio_bancarios`
+  e `antecipagov`, e nenhuma etapa da ingestão os converte; zeros à esquerda
+  chegam à raw;
+- **classificação `pessoal`**: banco, agência e conta são do fornecedor, que
+  pode ser pessoa física (30 dos 1.718 contratos das raws locais de ativos e
+  inativos têm `fornecedor_tipo = FISICA`).
+
+DagRun local em **2026-11-17**
+(`manual__2026-11-18T00:36:12.205324+00:00`), com `RAW_BACKEND=warehouse`,
+`INGEST_MAX_CONTRATOS=50` e a Variable de escopo apontada temporariamente para
+o órgão 17000 (removida depois; ela não existia): 906 contratos no escopo, 50
+depois do limite (28 ativos e 22 inativos), 2 blocos, 4 task instances em
+`success` em cerca de 1 min 40 s, 50 chamadas na primeira tentativa, 50
+respostas "sem domicílio" e nada gravado. `contratos_gov.raw_contrato_domicilio_bancario`
+não foi criada, o que é esperado.
+
+Como a fonte não devolveu domicílio, o caminho não vazio foi exercitado de duas
+formas, sempre com payload **sintético** (estrutura da OpenAPI, valores
+bancários fictícios):
+
+- testes unitários, nos dois backends (`test_contrato_domicilio_bancario_ingest_dag.py`);
+- `write_raw` contra o Postgres real do compose, num schema descartável
+  (`tmp_issue33_validacao`, removido no fim): todas as colunas `text`, índice
+  único em `contrato_id`, a mesma gravação repetida manteve 1 linha (com
+  `dt_ingest` atualizado), uma operação nova no mesmo contrato manteve 1 linha
+  com 2 operações, e outro contrato criou a 2ª linha; zeros à esquerda
+  preservados em `unidade_gestora` e dentro do JSON.
+
+Fica para a homologação, no primeiro domicílio real: confirmar o formato de
+objeto e os tipos dos campos, conferir se o mesmo `id` de operação aparece em
+mais de um contrato, comparar a raw com a API na mesma data (`contrato_id`,
+`dt_ingest` e a lista), confirmar a classificação, e repetir a execução para
+verificar que o upsert não duplica linhas.
+
+Uma possibilidade, não medida: o cabeçalho por UG traz
+`contratante.orgao.unidade_gestora.utiliza_antecipagov` (`"Sim"`/`"Não"`), que
+`achatar_contrato` hoje descarta. Se só UGs com `"Sim"` tiverem domicílio, a
+DAG poderia consultar apenas os contratos delas e cortar quase todas as
+chamadas. Isso muda a ingestão de cabeçalhos, fora do escopo da #33, e precisa
+antes ser confirmado contra o dado.
+
 ### Sobre o código do MGI: 46000, não 48000
 
 Na API do Contratos.gov.br, o órgão **46000** está presente na lista de órgãos
@@ -307,9 +419,10 @@ ADR-0019/0020). Fica o dado para quem for fechar a pendência.
   decididas aqui.
 - **Comportamento sob varredura completa.** Nunca observado. Ver a ressalva da
   decisão de concorrência.
-- **Estrutura das entidades da Fase 4.** `contrato_terceirizado`,
-  `contrato_despesa_acessoria` e `contrato_domicilio_bancario` vieram vazias em
-  toda a amostra: a chave primária declarada no catálogo para elas é hipótese, a
-  confirmar ao implementar a DAG. `contrato_ocorrencia` já tem DAG, e a chave
-  `[id]` tem evidência no código-fonte (ver "Ocorrências", acima); falta
-  confirmá-la em dado real, na homologação.
+- **Estrutura das entidades da Fase 4.** `contrato_terceirizado` e
+  `contrato_despesa_acessoria` vieram vazias em toda a amostra: a chave
+  primária declarada no catálogo para elas é hipótese, a confirmar ao
+  implementar a DAG. `contrato_ocorrencia` e `contrato_domicilio_bancario` já
+  têm DAG, com a estrutura e a chave (`[id]` e `[contrato_id]`) fundamentadas
+  no código-fonte e na OpenAPI (ver "Ocorrências" e "Domicílio bancário",
+  acima); falta confirmá-las em dado real, na homologação.
