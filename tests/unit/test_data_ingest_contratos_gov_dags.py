@@ -1,11 +1,7 @@
 """
 Integridade das DAGs de ingestão do Contratos.gov.br.
 
-Molde do test_data_ingest_compras_gov_dags.py, com uma diferença: a contagem
-esperada vem do disco, não de um número fixo. A pasta nasce vazia na fundação
-(issue #15) e cada issue filha (#16 a #33) acrescenta uma DAG — um número fixo
-obrigaria a editar este arquivo 18 vezes sem ganhar nada, já que o que ele
-protege são as regras estruturais, não a quantidade.
+Molde do test_data_ingest_compras_gov_dags.py, sempre que uma dag diferente entrar teremos que modificar esse teste.
 """
 
 import re
@@ -29,6 +25,9 @@ DAGS_FOLDER = (
 )
 
 TAG_FORMAT = re.compile(r"^[a-z_]+:[a-z0-9_]+$")
+# Só o sistema é fixo: o domínio varia entre as DAGs da pasta (unidade_contratante
+# é organizacional, os contratos são contratacoes) e é cobrado por
+# test_all_dags_have_dominio_tag.
 TAGS_OBRIGATORIAS = {"sistema:contratos_gov"}
 
 
@@ -116,6 +115,9 @@ class TestContratosGovDagsIntegrity:
     def test_unidade_contratante_tem_dominio_organizacional(self, dagbag: DagBag) -> None:
         dag = dagbag.dags["unidade_contratante_ingest_dag"]
         assert "dominio:organizacional" in dag.tags
+
+
+# --- orgao_contratante (issue #17) ------------------------------------------
 
 
 # --- orgao_contratante (issue #17) ------------------------------------------
