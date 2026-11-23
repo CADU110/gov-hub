@@ -202,7 +202,9 @@ def test_cada_contrato_tem_arquivo_proprio_no_object_storage(
     assert ingerir(["2289", "2290"])["parcelas"] == 2
 
     arquivos = sorted(tmp_path.rglob("*.parquet"))
-    assert {arquivo.stem for arquivo in arquivos} == {
+    # `write_raw` acrescenta `--lote-<hash>` ao nome para que dois lotes da mesma
+    # run não se sobrescrevam; a comparação é do par run + contrato.
+    assert {arquivo.stem.split("--lote-")[0] for arquivo in arquivos} == {
         "primeiro__contrato_2289",
         "primeiro__contrato_2290",
         "segundo__contrato_2289",
