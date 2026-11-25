@@ -26,6 +26,8 @@ dependencies = [
     "s3fs",
     "boto3",
     "adlfs",
+    "dbt-duckdb==1.11.0",
+    "duckdb>=1.5.6",
 ]
 
 [dependency-groups]

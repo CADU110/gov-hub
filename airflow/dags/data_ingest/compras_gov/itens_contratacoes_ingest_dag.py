@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from airflow.sdk import dag, task
@@ -26,9 +26,14 @@ default_args = {
 
 
 def _get_intervalo(context: dict) -> tuple[str, str]:
-    data_inicial = str(context["data_interval_start"].date())
-    data_final = str(context["data_interval_end"].date())
-    return data_inicial, data_final
+    dag_run = context["dag_run"]
+    fallback = dag_run.logical_date or dag_run.run_after
+    data_inicial = context.get("data_interval_start") or fallback
+    data_final = context.get("data_interval_end") or fallback
+    if data_final.date() <= data_inicial.date():
+        data_final = data_inicial + timedelta(days=1)
+        # Ajuste para garantir que o intervalo seja de pelo menos um dia
+    return str(data_inicial.date()), str(data_final.date())
 
 
 @dag(
@@ -41,7 +46,7 @@ def _get_intervalo(context: dict) -> tuple[str, str]:
         "Ingere itens de contratações (PNCP/Lei 14.133) da API do Compras.gov.br para "
         "compras_gov.raw_itens_contratacoes."
     ),
-    tags=["sistema:compras_gov", "dominio:contratacoes"],
+    tags=["sistema:compras_gov", "dominio:contratacoes", "orgao:mgi"],
 )
 def itens_contratacoes_dag() -> None:
     @task
@@ -64,7 +69,7 @@ def itens_contratacoes_dag() -> None:
         )
         return page_starts(total, BLOCK_SIZE)
 
-    @task
+    @task(max_active_tis_per_dag=2)
     def fetch_block(pagina_inicio: int, **context: dict) -> dict:
         data_inicial, data_final = _get_intervalo(context)
         api = ClienteComprasGov()
@@ -88,7 +93,13 @@ def itens_contratacoes_dag() -> None:
             api_total = resp.get("totalRegistros", 0)
             if not data:
                 break
-            write_raw(SISTEMA, ENTIDADE, data, primary_key=PK)
+            write_raw(
+                SISTEMA,
+                ENTIDADE,
+                data,
+                primary_key=PK,
+                run_date=date.fromisoformat(data_inicial),
+            )
             ingeridos += len(data)
             if resp.get("paginasRestantes", 0) == 0:
                 break

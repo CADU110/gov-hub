@@ -91,7 +91,8 @@ airflow/
     .airflowignore                 # dbt/ e superset/ fora da varredura do processor
     data_ingest/<sistema>/         # {entidade}_ingest_dag.py — compartilhadas entre órgãos
     data_ingest/<sistema>/<orgao>/ # {entidade}_{orgao}_ingest_dag.py — específica de um órgão
-    data_transform/<orgao>/        # {orgao}_transform_dag.py — DbtDag via Cosmos (ADR-0018)
+    data_transform/<orgao>/        # {orgao}_transform_dag.py — DbtDag via Cosmos (ADR-0018);
+                                   # duckdb_{orgao}_transform_dag.py — nós com tag duckdb (ADR-0022)
     data_publish/<orgao>/          # {orgao}_publish_dag.py — importa bundles no Superset (ADR-0019)
     data_report/<orgao>/           # {relatorio}_{orgao}_report_dag.py — via relatorio_dag_factory
     dbt/gov_bricks/                # pacote base: macros compartilhados (chave_conformada, schema_medallion)
@@ -110,7 +111,7 @@ catalogo/
 scripts/modelagem/                 # python -m scripts.modelagem {validar,sync,mapa,gerar}
 scripts/publicacao/                # python -m scripts.publicacao {validar,sync,matriz,plano}
 docker/                            # Dockerfile (airflow:3.2.2-python3.11), compose, init do Postgres
-docs/adr/                          # ADR-0000 a ADR-0021
+docs/adr/                          # ADR-0000 a ADR-0022
 tests/unit/                        # roda no CI; importa DAGs via DagBag
 tests/integration/                 # marcador `integration`; exige compose
 ```
@@ -267,6 +268,30 @@ cd airflow/dags/dbt/mgi
 DBT_PROFILES_DIR=.. DBT_HOST=localhost dbt deps && dbt build --select +contratos_por_orgao
 ```
 
+### Novo domínio lendo a raw em Parquet (DuckDB)
+
+A ARP é o modelo. Nenhuma DAG de transformação muda: a
+`duckdb_<orgao>_transform_dag` seleciona `tag:duckdb` e deriva o agendamento
+dos arquivos de Bronze.
+
+1. Bronze: `dbt/<sistema>/models/bronze/<entidade>.sql` contendo só
+   `{{ gov_bricks.bronze_parquet() }}`. O nome do arquivo **é** a entidade da
+   raw (`<bucket>/<sistema>/<entidade>/**/*.parquet`). Documente em
+   `models/bronze/schema.yml`.
+2. Ingestão: na DAG da entidade, `@task(outlets=[asset_raw(SISTEMA, ENTIDADE)])`
+   na task que roda depois de todos os lotes (ver `validate` da
+   `arp_ingest_dag`).
+3. Catálogo: `origem_atual: 001_bnz_<sistema>.<entidade>` e
+   `make modelo ARGS="--camada bronze --sistema <sistema>"`, que move a
+   entidade para o source `<sistema>_bronze`.
+4. Silver: `models/silver/<dominio>/`, com a pasta listada sob `silver:` no
+   `dbt_project.yml` do pacote com `+tags: ["duckdb"]`. Na Silver inicial
+   (só renomeia para snake_case), declare `gov_bricks.mesma_contagem` e
+   `gov_bricks.mesmo_conteudo_em_snake_case` com `comparar_com: ref("<entidade>")`.
+5. Testes: uma amostra da entidade em `AMOSTRAS` de
+   `tests/unit/test_fluxo_bronze_parquet_dbt.py`. Os demais testes percorrem
+   os arquivos e já cobrem o domínio novo.
+
 ### Novo sistema estruturante
 
 1. `cp catalogo/sistemas/_template.yml catalogo/sistemas/<sistema>.yml`.
@@ -309,7 +334,7 @@ DBT_PROFILES_DIR=.. DBT_HOST=localhost dbt deps && dbt build --select +contratos
 ### Novo ADR
 
 Copie `docs/adr/template.md` para `NNNN-titulo-kebab.md` (próximo número:
-0022), preencha **todas** as seções, inclusive Alternativas e Tradeoffs com
+0023), preencha **todas** as seções, inclusive Alternativas e Tradeoffs com
 `[Alto/Médio/Baixo impacto]` e uma Avaliação explícita. Um ADR só cita ADRs
 de número menor. Adicione a linha ao índice do `docs/adr/README.md`. ADR
 aceito não é editado retroativamente: crie um novo e marque o antigo como
@@ -405,6 +430,28 @@ Cada item abaixo já quebrou algo. Os comentários no código explicam mais.
   não `chave_conformada`.
 - `test_behavior=AFTER_EACH`: o teste roda logo após cada modelo, então um
   defeito na Silver para o ramo antes da Gold.
+- Teste que dá `ref()` em dois modelos (ex. `gov_bricks.mesma_contagem`
+  entre Silver e Bronze) entra, no `AFTER_EACH`, no `.test` do primeiro
+  modelo, antes de o segundo ser reconstruído. Na primeira execução a tabela
+  nem existe; nas seguintes, o teste compara com a versão anterior. Use
+  `RenderConfig(should_detach_multiple_parents_tests=True)`, que move esses
+  testes para uma task própria depois de todos os pais.
+- O cache do Cosmos (Variable `cosmos_cache__<dag_id>`) **não** é invalidado
+  por mudanças nos pacotes que o projeto importa (`compras_gov`, por exemplo).
+  Ao testar uma mudança no pacote, use `AIRFLOW__COSMOS__ENABLE_CACHE=False`
+  ou apague a Variable; senão a DAG pode mostrar o grafo antigo.
+- Nós com tag dbt `duckdb` leem Parquet com funções do DuckDB e só rodam no
+  target `prod_duckdb`, na `duckdb_<orgao>_transform_dag`. A DAG do projeto
+  inteiro os exclui com `exclude=["tag:duckdb"]`, e um `dbt build` manual no
+  `dev` precisa do mesmo `--exclude tag:duckdb`. Eles ficam habilitados, e
+  não com `enabled=false`, para que um modelo no PostgreSQL possa dar `ref()`
+  neles: o `+database` aponta para a mesma tabela física nos dois targets.
+  Testes genéricos não herdam a tag da pasta, mas a seleção indireta do dbt
+  os inclui e exclui junto com o modelo.
+- No `prod_duckdb`, não declare `database` no profile: o dbt-duckdb o deriva
+  do `path` e recusa os dois divergindo. As DAGs usam
+  `DUCKDB_GOVHUB_PATH=:memory:`, porque um arquivo teria lock de escrita
+  disputado por tasks paralelas.
 - `target/`, `dbt_packages/`, `logs/`, `package-lock.yml` e `.user.yml`
   dentro de `airflow/dags/dbt/` são artefatos locais ignorados pelo git. Se
   aparecerem no `git status`, algo mudou no `.gitignore`.
@@ -501,9 +548,12 @@ O que está feito e o que não está, para você não redescobrir.
   `Aceito`.
 - Há 14 marcadores `PREENCHER:` nos `schema.yml` de Silver do `compras_gov`
   e no SQL da Gold `contratos_por_orgao` (`grep -rn PREENCHER airflow/dags/dbt`).
-- As três DAGs de ARP (`arp`, `arp_item`, `arp_detalhes`) rodam às 06:00 e
-  07:00, **depois** de `mgi_transform_dag` (06:00). Hoje é inofensivo porque
-  nenhum modelo Silver lê ARP; ao modelar ARP, ajuste os horários.
+- A ARP é o primeiro domínio no modelo Parquet → DuckDB → PostgreSQL (receita
+  na seção 5): Bronze `001_bnz_compras_gov.arp` e Silver
+  `002_slv_arp.silver_compras_gov_arp`, na `duckdb_mgi_transform_dag`. As
+  entidades `arp_item` e `arp_detalhes` ainda não são modeladas. O padrão é o
+  ADR-0022, que registra como pendente a conversão de
+  `gov_bricks.bronze_parquet()` para `adapter.dispatch()` (exceção ao ADR-0011).
 - `catalogo/publicacao/mgi.yml`: o consumidor `mgi` tem `abrangencia: total`
   e `codigo_orgao_verificado: false`. `make lint` emite dois avisos por isso;
   não são erro, mas alguém precisa conferir o código 48000 contra a tabela

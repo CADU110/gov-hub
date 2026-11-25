@@ -1,5 +1,4 @@
 import logging
-import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -11,7 +10,7 @@ from landing_zone import write_raw
 
 SISTEMA = "compras_gov"
 PAGE_SIZE = 500
-BLOCK_SIZE = 15
+BLOCK_SIZE = 10
 
 ENDPOINT = "/modulo-material/7_consultarMaterialCaracteristicas"
 PARAMS: dict = {}
@@ -35,33 +34,42 @@ default_args = {
         "Ingere características de materiais do catálogo do Compras.gov.br para "
         "compras_gov.raw_caracteristicas_material."
     ),
-    tags=["sistema:compras_gov", "dominio:material"],
+    tags=["sistema:compras_gov", "dominio:material", "orgao:mgi"],
 )
 def catalogo_material_caracteristicas_dag() -> None:
     @task
     def get_page_starts() -> list[int]:
         api = ClienteComprasGov()
         _, resp = api.request(
-            "GET", ENDPOINT, params={**PARAMS, "pagina": 1, "tamanhoPagina": PAGE_SIZE}
+            "GET",
+            ENDPOINT,
+            params={**PARAMS, "pagina": 1, "tamanhoPagina": PAGE_SIZE},
+            timeout=30,
         )
-        total = resp.get("totalPaginas", 1) if isinstance(resp, dict) else 1
+        if not isinstance(resp, dict):
+            raise RuntimeError(f"A API não retornou resposta válida: {ENDPOINT}.")
+        total = resp.get("totalPaginas", 1)
         logging.info("[%s] Total de páginas: %s", ENDPOINT, total)
         return page_starts(total, BLOCK_SIZE)
 
-    @task
+    # endpoint lento e instável. algumas páginas levam 10s ou mais. por isso o
+    # timeout de 30s só aqui (o do cliente é 10s) e a concorrência reduzida.
+    @task(max_active_tis_per_dag=2)
     def fetch_block(pagina_inicio: int) -> dict:
         api = ClienteComprasGov()
         ingeridos = 0
         api_total = 0
         for pagina in range(pagina_inicio, pagina_inicio + BLOCK_SIZE):
-            time.sleep(1)
             _, resp = api.request(
                 "GET",
                 ENDPOINT,
                 params={**PARAMS, "pagina": pagina, "tamanhoPagina": PAGE_SIZE},
+                timeout=30,
             )
             if not isinstance(resp, dict):
-                break
+                raise RuntimeError(
+                    f"A API não retornou resposta válida: {ENDPOINT}, página={pagina}."
+                )
             data = [r for r in resp.get("resultado", []) if r is not None]
             api_total = resp.get("totalRegistros", 0)
             if not data:

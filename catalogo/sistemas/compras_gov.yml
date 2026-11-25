@@ -132,6 +132,18 @@ entidades:
     classificacao: publico
     chaves: []
 
+  resultado_itens_contratacoes:
+    descricao: >-
+      Resultados dos itens das contratações publicadas sob a Lei 14.133,
+      incluindo fornecedores, quantidades e valores apresentados.
+    granularidade: uma linha por resultado de item de contratação
+    dominio: contratacoes
+    dag: resultado_itens_contratacoes_ingest_dag
+    origem_atual: compras_gov.raw_resultado_itens_contratacoes
+    chave_primaria: [idcompraitem, sequencialresultado]
+    classificacao: publico
+    chaves: []
+
   natureza_despesa_material:
     descricao: >-
       Associação entre os PDMs (padrões descritivos de material) do catálogo e
@@ -151,6 +163,71 @@ entidades:
         observacao: >-
           A origem entrega a natureza detalhada de 8 dígitos, não a forma curta
           de 6 usada em parte dos relatórios do SIAFI.
+  
+  grupo_material:
+    descricao: >-
+      Grupos da hierarquia do catálogo de materiais.
+    granularidade: uma linha por grupo
+    dominio: catalogo
+    dag: catalogo_material_grupo_classe_ingest_dag
+    origem_atual: compras_gov.raw_grupo_material
+    chave_primaria: [codigogrupo]
+    classificacao: publico
+    chaves: []
+
+  classe_material:
+    descricao: >-
+      Classes da hierarquia do catálogo de materiais.
+    granularidade: uma linha por classe
+    dominio: catalogo
+    dag: catalogo_material_grupo_classe_ingest_dag
+    origem_atual: compras_gov.raw_classe_material
+    chave_primaria: [codigoclasse]
+    classificacao: publico
+    chaves: []
+
+  pdm_material:
+    descricao: >-
+      Padrões descritivos de material (PDM) da hierarquia do catálogo de
+      materiais.
+    granularidade: uma linha por PDM
+    dominio: catalogo
+    dag: catalogo_material_pdm_ingest_dag
+    origem_atual: compras_gov.raw_pdm_material
+    chave_primaria: [codigopdm]
+    classificacao: publico
+    chaves: []
+
+  item_material:
+    descricao: >-
+      Itens da hierarquia do catálogo de materiais.
+    granularidade: uma linha por item
+    dominio: catalogo
+    dag: catalogo_material_item_ingest_dag
+    origem_atual: compras_gov.raw_item_material
+    chave_primaria: [codigoitem]
+    classificacao: publico
+    chaves: []
+
+  unidade_fornecimento_material:
+    descricao: Unidades de fornecimento associadas aos PDMs.
+    granularidade: uma linha por PDM e unidade de fornecimento
+    dominio: catalogo
+    dag: catalogo_material_unidade_fornecimento_ingest_dag
+    origem_atual: compras_gov.raw_unidade_fornecimento_material
+    chave_primaria: []
+    classificacao: publico
+    chaves: []
+
+  caracteristicas_material:
+    descricao: Características dos itens e seus valores.
+    granularidade: uma linha por item, característica e valor de característica
+    dominio: catalogo
+    dag: catalogo_material_caracteristicas_ingest_dag
+    origem_atual: compras_gov.raw_caracteristicas_material
+    chave_primaria: []
+    classificacao: publico
+    chaves: []
 
   secao_servico:
     descricao: >-
@@ -209,7 +286,9 @@ entidades:
 
   item_servico:
     descricao: >-
-      Itens da hierarquia do catálogo de serviços.
+      Itens da hierarquia do catálogo de serviços, ativos e inativos. Em
+      object storage, um item inativado mantém a linha ativa antiga: o status
+      atual é o do registro mais recente por dt_ingest.
     granularidade: uma linha por item
     dominio: catalogo
     dag: catalogo_servico_item_ingest_dag
@@ -241,6 +320,7 @@ entidades:
     chave_primaria: [codigoservico, siglaunidademedida]
     classificacao: publico
     chaves: []
+
   pgc_agregacao:
     descricao: >-
       Dados agregados do Plano de Contratações Anual por órgão e ano, incluindo
@@ -285,3 +365,86 @@ entidades:
       - chave: nu_cnpj
         coluna: orgao
         verificado: true
+
+  pesquisa_preco_material:
+    descricao: Registros de preços consultados para itens do catálogo de materiais
+    granularidade: uma linha por registro de preço de material
+    dominio: pesquisa_preco
+    dag: pesquisa_preco_material_ingest_dag
+    origem_atual: compras_gov.raw_pesquisa_preco_material
+    chave_primaria: []
+    classificacao: pessoal
+    chaves: []
+
+  pesquisa_preco_servico:
+    descricao: Registros de preços consultados para itens do catálogo de serviços
+    granularidade: uma linha por registro de preço de serviço
+    dominio: pesquisa_preco
+    dag: pesquisa_preco_servico_ingest_dag
+    origem_atual: compras_gov.raw_pesquisa_preco_servico
+    chave_primaria: []
+    classificacao: pessoal
+    chaves: []
+
+  arp:
+    descricao: >-
+      Atas de Registro de Preço consultadas no módulo ARP do Compras.gov.br.
+    granularidade: uma linha por ata de registro de preço e compra
+    dominio: arp
+    dag: arp_ingest_dag
+    # Tabela Bronze materializada pelo modelo dbt arp a partir dos Parquets.
+    origem_atual: 001_bnz_compras_gov.arp
+    chave_primaria: [numeroAtaRegistroPreco, idCompra]
+    classificacao: publico
+    chaves: []
+
+  arp_item:
+    descricao: >-
+      Itens associados às Atas de Registro de Preço do Compras.gov.br.
+    granularidade: uma linha por item, fornecedor, ata, unidade gerenciadora e compra
+    dominio: arp
+    dag: arp_item_ingest_dag
+    origem_atual: compras_gov.raw_arp_item
+    chave_primaria:
+      [
+        numeroAtaRegistroPreco,
+        codigoUnidadeGerenciadora,
+        numeroItem,
+        idCompra,
+        niFornecedor,
+      ]
+    classificacao: publico
+    chaves: []
+
+  arp_unidades_item:
+    descricao: >-
+      Unidades vinculadas aos itens das Atas de Registro de Preço.
+    granularidade: uma linha por unidade vinculada a um item de ata
+    dominio: arp
+    dag: arp_detalhes_ingest_dag
+    origem_atual: compras_gov.raw_arp_unidades_item
+    chave_primaria: []
+    classificacao: publico
+    chaves: []
+
+  arp_adesoes_item:
+    descricao: >-
+      Adesões vinculadas aos itens das Atas de Registro de Preço.
+    granularidade: uma linha por adesão vinculada a um item de ata
+    dominio: arp
+    dag: arp_detalhes_ingest_dag
+    origem_atual: compras_gov.raw_arp_adesoes_item
+    chave_primaria: []
+    classificacao: publico
+    chaves: []
+
+  arp_empenhos_saldo:
+    descricao: >-
+      Empenhos e saldos vinculados às Atas de Registro de Preço.
+    granularidade: uma linha por empenho e saldo de uma ata
+    dominio: arp
+    dag: arp_detalhes_ingest_dag
+    origem_atual: compras_gov.raw_arp_empenhos_saldo
+    chave_primaria: []
+    classificacao: publico
+    chaves: []

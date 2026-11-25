@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from airflow.sdk import dag, task
@@ -23,9 +23,14 @@ default_args = {
 
 
 def _get_intervalo(context: dict) -> tuple[str, str]:
-    data_inicial = str(context["data_interval_start"].date())
-    data_final = str(context["data_interval_end"].date())
-    return data_inicial, data_final
+    dag_run = context["dag_run"]
+    fallback = dag_run.logical_date or dag_run.run_after
+    data_inicial = context.get("data_interval_start") or fallback
+    data_final = context.get("data_interval_end") or fallback
+    if data_final.date() <= data_inicial.date():
+        data_final = data_inicial + timedelta(days=1)
+        # Ajuste para garantir que o intervalo seja de pelo menos um dia
+    return str(data_inicial.date()), str(data_final.date())
 
 
 @dag(
@@ -38,7 +43,7 @@ def _get_intervalo(context: dict) -> tuple[str, str]:
         "Ingere contratações públicas (PNCP/Lei 14.133) por modalidade da API do Compras.gov.br para "
         "compras_gov.raw_contratacoes."
     ),
-    tags=["sistema:compras_gov", "dominio:contratacoes"],
+    tags=["sistema:compras_gov", "dominio:contratacoes", "orgao:mgi"],
 )
 def contratacoes_dag() -> None:
     @task
@@ -93,14 +98,20 @@ def contratacoes_dag() -> None:
             api_total = resp.get("totalRegistros", 0)
             if not data:
                 break
-            write_raw(SISTEMA, "contratacoes", data, primary_key=["idcompra"])
+            write_raw(
+                SISTEMA,
+                "contratacoes",
+                data,
+                primary_key=["idcompra"],
+                run_date=date.fromisoformat(data_inicial),
+            )
             ingeridos += len(data)
             if resp.get("paginasRestantes", 0) == 0:
                 break
         return {"ingeridos": ingeridos, "api_total": api_total}
 
     @task
-    def validate_contratacoes(results: Any, modalidade: int) -> None:
+    def validate_contratacoes(results: Any, modalidade: int) -> dict[str, int]:
         total_ingerido = sum(r["ingeridos"] for r in results)
         api_total = results[0]["api_total"] if results else 0
         if total_ingerido != api_total:
@@ -116,9 +127,32 @@ def contratacoes_dag() -> None:
                 modalidade,
                 total_ingerido,
             )
+        return {
+            "modalidade": modalidade,
+            "ingeridos": total_ingerido,
+            "api_total": api_total,
+        }
+
+    @task
+    def log_total_contratacoes(totais: list[dict[str, int]], **context: dict) -> None:
+        data_inicial, data_final = _get_intervalo(context)
+        resumo = "\n".join(
+            f"modalidade={r['modalidade']} ingeridos={r['ingeridos']} "
+            f"api_total={r['api_total']} "
+            f"status={'OK' if r['ingeridos'] == r['api_total'] else 'DIVERGENTE'}"
+            for r in totais
+        )
+        logging.info(
+            "[contratacoes] Resumo %s→%s\n%s\ntotal_ingerido=%s",
+            data_inicial,
+            data_final,
+            resumo,
+            sum(r["ingeridos"] for r in totais),
+        )
 
     # Modalidades sequenciais: m3 → m5 → m6 → m7
     prev_val = None
+    totais = []
     for modalidade in MODALIDADES:
         starts = get_page_starts_contratacoes.override(
             task_id=f"get_page_starts_m{modalidade}"
@@ -135,6 +169,10 @@ def contratacoes_dag() -> None:
         if prev_val is not None:
             prev_val >> starts
         prev_val = val
+        totais.append(val)
+
+    # O Airflow resolve o XComArg para os resultados antes de executar a task.
+    log_total_contratacoes(totais)  # ty: ignore[invalid-argument-type]
 
 
 contratacoes_dag()
