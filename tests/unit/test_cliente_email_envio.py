@@ -89,7 +89,10 @@ class TestEnvioDeRelatorio:
         assert anexo.get_content_type() == "text/csv"
 
     def test_extensao_desconhecida_vira_binario(self, smtp) -> None:
-        self._enviar(["a@ipea.gov.br"], anexos=[("relatorio.parquet", b"PAR1")])
+        # Extensão inventada de propósito: guess_type consulta o banco de tipos do
+        # sistema, e uma extensão real (.parquet) passou a ser conhecida na imagem
+        # do GitHub Actions em 2026-10, quebrando o teste sem mudança no código.
+        self._enviar(["a@ipea.gov.br"], anexos=[("relatorio.desconhecida", b"PAR1")])
         anexo = next(smtp.instancias[0].mensagem.iter_attachments())
         assert anexo.get_content_type() == "application/octet-stream"
 

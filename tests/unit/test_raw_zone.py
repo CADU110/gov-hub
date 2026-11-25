@@ -199,6 +199,20 @@ class TestEscritaEmObjectStorage:
         assert "sem-run-id-" in destino
 
 
+class TestAssetDaRaw:
+    def test_nome_identifica_sistema_e_entidade(self) -> None:
+        asset = landing_zone.asset_raw("compras_gov", "arp")
+        assert asset.name == "raw.compras_gov.arp"
+        assert asset != landing_zone.asset_raw("compras_gov", "arp_item")
+
+    def test_nao_depende_do_backend(self, monkeypatch) -> None:
+        """Trocar o RAW_BACKEND não pode quebrar o agendamento da transformação."""
+        monkeypatch.setenv("RAW_BACKEND", "warehouse")
+        no_banco = landing_zone.asset_raw("compras_gov", "arp")
+        monkeypatch.setenv("RAW_BACKEND", "object_storage")
+        assert landing_zone.asset_raw("compras_gov", "arp") == no_banco
+
+
 class TestLoteVazio:
     @pytest.mark.parametrize("backend", ["warehouse", "object_storage"])
     def test_nada_a_gravar_nao_toca_o_destino(self, backend, monkeypatch) -> None:

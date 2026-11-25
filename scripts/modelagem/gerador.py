@@ -2,8 +2,8 @@
 
 O gerador escreve três coisas:
 
-- ``models/bronze/sources.yml`` — a Bronze declarada como *source* dbt, já que
-  ela é materializada pela DAG de ingestão, não por dbt (ver ADR-0017);
+- ``models/bronze/sources.yml`` — fontes relacionais declaradas no catálogo,
+  incluindo tabelas raw e tabelas Bronze já materializadas;
 - ``models/silver/<dominio>/<entidade>.sql`` — a Silver, com as chaves
   conformadas já normalizadas e a deduplicação por chave primária;
 - ``models/gold/<produto>/<entidade>.sql`` — a Gold, com o cruzamento entre
@@ -128,7 +128,7 @@ def caminho_projeto(orgao: str) -> Path:
 
 
 # --------------------------------------------------------------------------
-# Bronze — declarada como source, não como modelo (ADR-0017).
+# Bronze — declaração das fontes relacionais do catálogo (ADR-0017).
 # --------------------------------------------------------------------------
 
 
@@ -144,13 +144,17 @@ def gerar_sources(
             "não há Bronze para declarar como source."
         )
 
-    schemas = {e.schema_origem for e in entidades}
+    # A migração pode ocorrer entidade por entidade: preservar o source antigo
+    # das tabelas raw e declarar a Bronze materializada em seu próprio schema.
+    materializadas = [e for e in entidades if e.schema_origem == sistema.schema_bronze]
+    raw = [e for e in entidades if e.schema_origem != sistema.schema_bronze]
+    schemas = {e.schema_origem for e in raw}
     if len(schemas) > 1:
         raise ErroCatalogo(
             f"Entidades de '{id_sistema}' apontam para schemas diferentes "
             f"({', '.join(sorted(s or '?' for s in schemas))}); declare os sources à mão."
         )
-    schema = schemas.pop() or sistema.schema_bronze
+    schema = (schemas.pop() if schemas else None) or sistema.schema_bronze
 
     linhas = [
         "# GERADO por `make modelo` a partir de catalogo/sistemas/"
@@ -165,12 +169,45 @@ def gerar_sources(
         "version: 2",
         "",
         "sources:",
-        f"  - name: {sistema.id}",
+    ]
+    if materializadas:
+        linhas[2:7] = [
+            "# Fontes relacionais descritas por origem_atual no catálogo.",
+            "# Tabelas raw mantêm o source do sistema; a Bronze materializada",
+            "# usa o source <sistema>_bronze, sem alterar a ingestão.",
+        ]
+    if raw:
+        linhas += _linhas_source(sistema, raw, sistema.id, schema)
+    if materializadas:
+        linhas += _linhas_source(
+            sistema, materializadas, f"{sistema.id}_bronze", sistema.schema_bronze
+        )
+
+    caminho = caminho_pacote(sistema.id) / "models" / "bronze" / "sources.yml"
+    # sources.yml é integralmente derivado do catálogo: regerar sempre é seguro.
+    return [_escrever(caminho, "\n".join(linhas).rstrip() + "\n", forcar=True)]
+
+
+def _linhas_source(
+    sistema: Sistema, entidades: list[Entidade], nome: str, schema: str
+) -> list[str]:
+    materializada = schema == sistema.schema_bronze
+    origem = "pelo dbt" if materializada else "pelas DAGs de ingestão"
+    linhas = [
+        f"  - name: {nome}",
         f"    schema: {schema}",
+    ]
+    if materializada:
+        # No DuckDB o nome é o alias do PostgreSQL anexado, não o arquivo local.
+        linhas.append(
+            "    database: \"{{ 'data_warehouse' if target.type == 'duckdb' "
+            "else env_var('DBT_DATABASE', 'data_warehouse') }}\""
+        )
+    linhas += [
         "    description: >",
         _quebrar(
-            f"Camada Bronze de {sistema.nome}: dado fiel à fonte, gravado pelas "
-            f"DAGs de ingestão. {sistema.descricao}",
+            f"Camada Bronze de {sistema.nome}: dado fiel à fonte, gravado "
+            f"{origem}. {sistema.descricao}",
             recuo="      ",
         ),
         "    meta:",
@@ -195,9 +232,7 @@ def gerar_sources(
             linhas.append(f"          dag_ingestao: {entidade.dag}")
         linhas.append("")
 
-    caminho = caminho_pacote(sistema.id) / "models" / "bronze" / "sources.yml"
-    # sources.yml é integralmente derivado do catálogo: regerar sempre é seguro.
-    return [_escrever(caminho, "\n".join(linhas).rstrip() + "\n", forcar=True)]
+    return linhas
 
 
 # --------------------------------------------------------------------------
@@ -255,7 +290,12 @@ def _sql_silver(sistema: Sistema, entidade: Entidade) -> str:
             )
             cabecalho.append("--          não foi verificado contra o dado ingerido.")
 
-    fonte = f'{{{{ source("{sistema.id}", "{entidade.id}") }}}}'
+    nome_source = (
+        f"{sistema.id}_bronze"
+        if entidade.schema_origem == sistema.schema_bronze
+        else sistema.id
+    )
+    fonte = f'{{{{ source("{nome_source}", "{entidade.id}") }}}}'
     linhas = [
         *cabecalho,
         "",

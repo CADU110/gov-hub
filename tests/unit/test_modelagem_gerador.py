@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import textwrap
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -150,6 +151,48 @@ def test_sources_declaram_a_bronze_com_identifier_da_origem(catalogo) -> None:
     assert tabelas["contratos"]["identifier"] == "raw_contratos"
     assert tabelas["contratos"]["meta"]["dag_ingestao"] == "contratos_ingest_dag"
     assert fonte["meta"]["camada"] == "bronze"
+
+
+def test_sources_separam_bronze_materializada_sem_mudar_demais_origens(catalogo):
+    sistema = catalogo.sistema("compras")
+    sistema.entidades["contratos"] = replace(
+        sistema.entidades["contratos"], origem_atual="001_bnz_compras.contratos"
+    )
+    (escrita,) = gerador.gerar_sources(catalogo, "compras")
+    fontes = {s["name"]: s for s in _yaml_do(escrita.caminho)["sources"]}
+    assert fontes["compras"]["schema"] == "bruto"
+    assert {t["identifier"] for t in fontes["compras"]["tables"]} == {
+        "raw_unidades",
+        "raw_isolada",
+    }
+    bronze = fontes["compras_bronze"]
+    assert bronze["schema"] == "001_bnz_compras"
+    assert bronze["tables"][0]["identifier"] == "contratos"
+    assert "target.type == 'duckdb'" in bronze["database"]
+    assert "data_warehouse" in bronze["database"]
+    sql, _ = gerador.gerar_silver(catalogo, "compras", "contratos")
+    assert '{{ source("compras_bronze", "contratos") }}' in sql.caminho.read_text()
+
+
+def test_sources_aceitam_sistema_inteiro_na_bronze_materializada(catalogo):
+    sistema = catalogo.sistema("compras")
+    for nome, entidade in sistema.entidades.items():
+        sistema.entidades[nome] = replace(
+            entidade, origem_atual=f"001_bnz_compras.{nome}"
+        )
+    (escrita,) = gerador.gerar_sources(catalogo, "compras")
+    (fonte,) = _yaml_do(escrita.caminho)["sources"]
+    assert fonte["name"] == "compras_bronze"
+    assert len(fonte["tables"]) == 3
+
+
+def test_sources_continuam_rejeitando_schemas_raw_ambiguos(catalogo):
+    sistema = catalogo.sistema("compras")
+    sistema.entidades["contratos"] = replace(
+        sistema.entidades["contratos"], origem_atual="outro.raw_contratos"
+    )
+    with pytest.raises(ErroCatalogo, match="schemas diferentes"):
+        gerador.gerar_sources(catalogo, "compras")
 
 
 # --------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 ## Descrição
 <!-- O que esse PR faz? Por que essa mudança é necessária? -->
 
-> Antes de abrir este PR, consulte o [Protocolo de Aprovação de Pull Requests](https://github.com/GovHub-br/gov-bricks/blob/main/.github/MERGE_REQUEST_PROTOCOL.md).
+> Antes de abrir este PR, consulte o [Protocolo de Aprovação de Pull Requests](https://github.com/GovHub-br/gov-hub/blob/main/.github/MERGE_REQUEST_PROTOCOL.md).
 
 ## Tipo de mudança
 - [ ] Nova funcionalidade / pipeline
@@ -21,7 +21,9 @@ Closes #
 - [ ] IPEA
 - [ ] MIR
 - [ ] MCid
+- [ ] MGI
 - [ ] MinC
+- [ ] Infra
 - [ ] OSS
 - [ ] Múltiplos domínios: ___
 

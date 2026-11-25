@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 from airflow.models import DagBag
 
 pytestmark = pytest.mark.unit
@@ -92,3 +93,83 @@ class TestGrafoDbtRenderizado:
                 t.startswith(modelo) for t in tasks
             ), f"modelo '{modelo}' não virou task: {sorted(tasks)}"
         assert len(tasks) > 1
+
+
+def _no(task) -> dict:
+    """O nó dbt que o Cosmos associou à task."""
+    return task.extra_context["dbt_node_config"]
+
+
+def _bronzes_parquet(orgao: str) -> list[tuple[str, str]]:
+    """(sistema, entidade) de cada Bronze em Parquet dos pacotes do órgão."""
+    dbt = DAGS_FOLDER.parent / "dbt"
+    pacotes = [
+        p["local"].rsplit("/", 1)[-1]
+        for p in yaml.safe_load((dbt / orgao / "packages.yml").read_text())["packages"]
+    ]
+    return [
+        (pacote, modelo.stem)
+        for pacote in pacotes
+        for modelo in sorted((dbt / pacote / "models/bronze").glob("*.sql"))
+    ]
+
+
+class TestSeparacaoPostgresDuckdb:
+    """Cada órgão com nós `duckdb` tem as duas DAGs, sem nó em comum."""
+
+    @pytest.fixture(params=["mgi"])
+    def orgao(self, request) -> str:
+        return request.param
+
+    def test_nos_duckdb_ficam_fora_da_dag_do_projeto(self, dagbag, orgao) -> None:
+        """Bronze em Parquet usa `read_parquet`, que não existe no PostgreSQL.
+
+        Se a tag `duckdb` parar de excluir esses nós (ou os testes deles), a
+        DAG do projeto inteiro volta a falhar todo dia.
+        """
+        duckdb_ids = {
+            _no(t)["unique_id"]
+            for t in dagbag.dags[f"duckdb_{orgao}_transform_dag"].tasks
+            if _no(t)["resource_type"] == "model"
+        }
+        assert duckdb_ids
+        for task in dagbag.dags[f"{orgao}_transform_dag"].tasks:
+            no = _no(task)
+            assert "duckdb" not in no["tags"], task.task_id
+            assert not duckdb_ids & {no["unique_id"], *no["depends_on"]}, task.task_id
+
+    def test_dag_duckdb_executa_toda_bronze_parquet(self, dagbag, orgao) -> None:
+        dag = dagbag.dags[f"duckdb_{orgao}_transform_dag"]
+        modelos = {_no(t)["unique_id"] for t in dag.tasks}
+        for sistema, entidade in _bronzes_parquet(orgao):
+            assert f"model.{sistema}.{entidade}" in modelos
+        for task in dag.tasks:
+            if _no(task)["resource_type"] == "model":
+                assert "duckdb" in _no(task)["tags"], task.task_id
+
+    def test_testes_com_dois_pais_rodam_depois_de_todos(self, dagbag, orgao) -> None:
+        """Os que comparam Silver e Bronze: rodar junto com o teste da Bronze
+        compararia a Bronze nova com a Silver da execução anterior."""
+        dag = dagbag.dags[f"duckdb_{orgao}_transform_dag"]
+        run = {
+            _no(t)["unique_id"]: t.task_id for t in dag.tasks if t.task_id.endswith("run")
+        }
+        for task in dag.tasks:
+            pais = [p for p in _no(task)["depends_on"] if p.startswith("model.")]
+            if _no(task)["resource_type"] == "test" and len(pais) > 1:
+                assert task.upstream_task_ids >= {run[p] for p in pais}, task.task_id
+
+    def test_dag_duckdb_roda_em_memoria(self, dagbag, orgao) -> None:
+        for task in dagbag.dags[f"duckdb_{orgao}_transform_dag"].tasks:
+            assert task.profile_config.target_name == "prod_duckdb"
+            assert task.env["DUCKDB_GOVHUB_PATH"] == ":memory:"
+
+    def test_dag_duckdb_e_agendada_pelos_assets_da_raw(self, dagbag, orgao) -> None:
+        import landing_zone
+
+        dag = dagbag.dags[f"duckdb_{orgao}_transform_dag"]
+        assert list(dag.timetable.asset_condition.objects) == [
+            landing_zone.asset_raw(s, e) for s, e in _bronzes_parquet(orgao)
+        ]
+        assert type(dag.timetable.asset_condition).__name__ == "AssetAny"
+        assert dag.max_active_runs == 1

@@ -2,12 +2,16 @@ import json
 import logging
 import os
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 import uuid
 
 
 import polars as pl
 
 from cliente_storage import ensure_bucket_exists, get_bucket, get_storage_fs
+
+if TYPE_CHECKING:
+    from airflow.sdk import Asset
 
 
 def build_landing_path(
@@ -90,6 +94,24 @@ def get_raw_backend() -> str:
 def raw_table_name(entity: str) -> str:
     """Nome da tabela raw de uma entidade, no backend `warehouse`."""
     return f"raw_{entity}"
+
+
+def asset_raw(source: str, entity: str) -> "Asset":
+    """Asset do Airflow que representa uma entidade na zona raw.
+
+    A DAG de ingestão o declara como `outlet` da task que fecha a execução, e a
+    DAG de transformação do domínio (ADR-0018) é agendada por ele: a Bronze só
+    lê a raw depois que todos os lotes do dia foram gravados, em vez de depender
+    de uma janela de horário. Montar o Asset aqui garante que os dois lados usem
+    o mesmo nome. O nome não depende do backend, então trocar o RAW_BACKEND não
+    quebra o agendamento.
+
+    O import é local pelo mesmo motivo do `_run_id_do_contexto`: o resto do
+    módulo funciona sem Airflow.
+    """
+    from airflow.sdk import Asset
+
+    return Asset(f"raw.{source}.{entity}")
 
 
 def stamp_ingestion(records: list[dict], moment: datetime | None = None) -> list[dict]:
