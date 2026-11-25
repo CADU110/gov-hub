@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -78,6 +79,9 @@ class TestDagSelectorIsIncluded:
         assert not selector.is_included(tmp_path / "data_ingest" / "cnpq" / "dag.py")
 
         selector_file.write_text("data_ingest/cnpq/\n", encoding="utf-8")
+        # Duas escritas seguidas podem cair no mesmo tick do mtime; força um novo.
+        stat = selector_file.stat()
+        os.utime(selector_file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
 
         assert selector.is_included(tmp_path / "data_ingest" / "cnpq" / "dag.py")
         assert not selector.is_included(tmp_path / "data_ingest" / "ibge" / "dag.py")
