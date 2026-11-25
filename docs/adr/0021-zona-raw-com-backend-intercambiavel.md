@@ -54,7 +54,7 @@ que o `STORAGE_BACKEND` já usa para object storage (ADR-0011, item 5):
 
 | `RAW_BACKEND` | Forma física | Deployment típico |
 |---|---|---|
-| `object_storage` (padrão) | Parquet na convenção de caminho do ADR-0012: `{bucket}/{sistema}/{entidade}/{ano}/{mes}/{dia}/{run_id}.parquet` | Datalake — engine que lê arquivos (DuckDB, Trino, Spark, Athena) |
+| `object_storage` (padrão) | Parquet na convenção de caminho do ADR-0012: `{bucket}/{sistema}/{entidade}/{ano}/{mes}/{dia}/{run_id}--lote-{lote_id}.parquet` | Datalake — engine que lê arquivos (DuckDB, Trino, Spark, Athena) |
 | `warehouse` | Tabela `raw_{entidade}` no schema do sistema, no banco analítico | Órgão que roda só um banco relacional |
 
 O que **não** muda entre os dois: o vocabulário. `{sistema}` e `{entidade}` são

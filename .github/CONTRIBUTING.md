@@ -12,6 +12,7 @@ Obrigado por considerar contribuir com o **gov-bricks**, o framework de dados co
 - [Convenções de Branch e Commit](#convenções-de-branch-e-commit)
 - [Fluxo de Pull Request](#fluxo-de-pull-request)
 - [Protocolo de Aprovação de Pull Requests](#protocolo-de-aprovação-de-pull-requests)
+- [Onde Conversar ou Abrir uma Issue](#onde-conversar-ou-abrir-uma-issue)
 - [Como Pegar ou Atribuir Issues](#como-pegar-ou-atribuir-issues)
 - [Processo de Code Review](#processo-de-code-review)
 - [Executando os Testes](#executando-os-testes)
@@ -202,6 +203,23 @@ Esse protocolo detalha critérios obrigatórios de documentação, testes, lint,
 
 ---
 
+## Onde Conversar ou Abrir uma Issue
+
+As [Discussions](https://github.com/GovHub-br/gov-hub/discussions) são o espaço para conversar antes de transformar uma ideia em trabalho planejado:
+
+- [Q&A](https://github.com/GovHub-br/gov-hub/discussions/categories/q-a): dúvidas sobre o projeto e como contribuir.
+- [Ideas](https://github.com/GovHub-br/gov-hub/discussions/categories/ideas): propostas e melhorias que ainda precisam de debate ou definição de escopo.
+- [General](https://github.com/GovHub-br/gov-hub/discussions/categories/general): conversas sobre o GovHub que não cabem nas outras categorias.
+- [Announcements](https://github.com/GovHub-br/gov-hub/discussions/categories/announcements): comunicados da manutenção.
+
+As categorias de domínio já existentes, como Compras Gov, PNCP e SIORG, continuam disponíveis para conversas específicas. Não é preciso criar uma categoria nova para cada assunto.
+
+Quando houver um bug reproduzível ou uma tarefa definida, abra uma [issue](https://github.com/GovHub-br/gov-hub/issues) no repositório responsável. Se uma conversa em Discussion resultar em trabalho concreto, registre o encaminhamento na issue e mantenha o link entre os dois.
+
+Tem sugestões para organizar esse espaço? Participe da [conversa sobre as Discussions](https://github.com/GovHub-br/gov-hub/discussions/65).
+
+---
+
 ## Como Pegar ou Atribuir Issues
 
 1. Navegue até a aba [**Issues**](https://github.com/GovHub-br/gov-bricks/issues) do repositório.
@@ -212,7 +230,7 @@ Esse protocolo detalha critérios obrigatórios de documentação, testes, lint,
 
 > Não abra PRs para issues já atribuídas a outro contribuidor sem combinar antes.
 
-Toda solicitação de mudança ou sugestão deve ser registrada como issue.
+Antes de começar a implementação, registre a tarefa como issue e combine a atribuição com a manutenção.
 
 ---
 

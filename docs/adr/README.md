@@ -17,6 +17,56 @@ Veja o racional completo e os benefícios deste processo em
 [ADR-0000](./0000-por-que-adrs.md), baseado no
 [guia de ADRs da AWS](https://docs.aws.amazon.com/pt_br/prescriptive-guidance/latest/architectural-decision-records/adr-process.html).
 
+## Quando criar uma ADR
+
+Crie uma ADR quando a decisão afetar arquitetura, manutenção, operação ou
+evolução do GovHub de forma que alguém possa precisar entender o motivo no
+futuro. A pergunta prática é: se uma pessoa nova entrar no projeto daqui a
+seis meses, ela precisará saber por que escolhemos esse caminho?
+
+Use ADRs para decisões como:
+
+- escolha ou troca de ferramentas centrais, como orquestrador, ferramenta de
+  transformação, motor de consulta, catálogo ou armazenamento;
+- mudança em padrões compartilhados de DAGs, dbt, schemas, camadas, catálogo,
+  publicação ou governança;
+- definição de arquitetura que afeta mais de um time, órgão, produto de dados
+  ou repositório;
+- decisão que cria restrições, tradeoffs, custos de migração ou dependências
+  relevantes;
+- substituição de uma decisão arquitetural registrada em ADR anterior.
+
+Não crie ADR para:
+
+- correções pontuais de bug;
+- mudanças pequenas de texto, layout ou nomenclatura sem impacto arquitetural;
+- tarefas operacionais sem decisão técnica relevante;
+- decisões já cobertas por ADR existente, quando basta referenciar a decisão
+  atual.
+
+Se houver dúvida, abra a discussão no PR ou na issue. Se a decisão precisar
+explicar contexto, alternativas e tradeoffs, ela provavelmente merece uma ADR.
+
+## Onde registrar
+
+- Decisões do framework compartilhado ficam neste diretório: `docs/adr/`.
+- Decisões específicas de outro repositório devem ficar no `docs/adr/` do
+  próprio repositório, seguindo este padrão como referência.
+- Quando uma mudança em outro repositório depender de uma decisão registrada
+  aqui, referencie a ADR no PR, na issue ou na documentação afetada.
+
+## Como usar no fluxo de trabalho
+
+1. Identifique durante uma issue, PR ou discussão que existe uma decisão
+   arquitetural a registrar.
+2. Copie [`template.md`](./template.md) para um novo arquivo numerado.
+3. Preencha o contexto, a decisão, as alternativas consideradas, os tradeoffs
+   e as consequências.
+4. Abra ou atualize o PR com a ADR junto da mudança relacionada.
+5. Peça revisão de pelo menos uma pessoa do time responsável.
+6. Depois da aprovação, mantenha a ADR como histórico da decisão. Se a decisão
+   mudar no futuro, crie uma nova ADR e marque a anterior como substituída.
+
 ## Convenções
 
 - **Numeração**: sequencial, com 4 dígitos.
@@ -58,6 +108,15 @@ de documentação sem bloquear a numeração de ADRs que já estão prontos. Ele
 contém só título, status e um resumo de escopo; quem for escrevê-lo de fato
 substitui o corpo pelo conteúdo de `template.md`, preenchido normalmente.
 
+## Mensagem sugerida para divulgação
+
+> Pessoal, vamos usar ADRs para registrar decisões técnicas e arquiteturais
+> importantes do GovHub. A ideia não é documentar qualquer ajuste pequeno, mas
+> deixar registrado o contexto, as alternativas e os tradeoffs de decisões que
+> afetam arquitetura, manutenção, operação ou evolução do projeto. O padrão está
+> documentado em `docs/adr/README.md`, e novos registros devem partir do
+> `docs/adr/template.md`.
+
 ## Índice
 
 | ADR | Título | Status |
@@ -84,3 +143,4 @@ substitui o corpo pelo conteúdo de `template.md`, preenchido normalmente.
 | [0019](./0019-publicacao-dashboards-relatorios.md) | Publicação de produtos de dados — dashboards versionadas e relatórios periódicos | Proposto |
 | [0020](./0020-niveis-acesso-consumo-dados.md) | Níveis de acesso derivados da classificação de sensibilidade | Proposto |
 | [0021](./0021-zona-raw-com-backend-intercambiavel.md) | Zona raw com backend intercambiável e Bronze lendo da raw | Proposto |
+| [0022](./0022-transformacao-parquet-com-duckdb-e-assets.md) | Transformação da raw em Parquet com DuckDB e agendamento por Assets | Proposto |

@@ -224,7 +224,9 @@ class TestSubrecursos:
         with (
             patch.object(cliente.client, "request", return_value=resposta),
             patch("cliente_base.time.sleep"),
-            pytest.raises(Exception, match="API failed after the maximum"),
+            pytest.raises(
+                Exception, match="API request failed with a non-transient error"
+            ),
         ):
             cliente.listar_subrecurso(106156, "itens")
 

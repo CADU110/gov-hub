@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 from airflow.models import DagBag
 
 pytestmark = pytest.mark.unit
@@ -27,7 +28,7 @@ class TestComprasGovDagsIntegrity:
         assert dagbag.import_errors == {}, dagbag.import_errors
 
     def test_expected_number_of_dags_loaded(self, dagbag: DagBag) -> None:
-        assert len(dagbag.dags) == 23
+        assert len(dagbag.dags) == 28
 
     def test_dag_ids_match_filenames(self, dagbag: DagBag) -> None:
         py_files = {p.stem for p in DAGS_FOLDER.glob("*.py")}
@@ -65,3 +66,32 @@ class TestComprasGovDagsIntegrity:
             if not dag.default_args.get("owner")
         ]
         assert not missing, f"DAGs sem owner em default_args: {missing}"
+
+
+RAIZ = Path(__file__).resolve().parents[2]
+BRONZES_PARQUET = sorted(
+    p.stem for p in (RAIZ / "airflow/dags/dbt/compras_gov/models/bronze").glob("*.sql")
+)
+
+
+class TestAssetsDaRaw:
+    @pytest.mark.parametrize("entidade", BRONZES_PARQUET)
+    def test_ingestao_de_bronze_parquet_avisa_a_transformacao_no_fim(
+        self, dagbag: DagBag, entidade: str
+    ) -> None:
+        """A duckdb_<orgao>_transform_dag é agendada pelo Asset da raw de cada
+        Bronze em Parquet. A DAG de ingestão da entidade (a do catálogo) precisa
+        emiti-lo numa task que só roda depois de todas as outras, senão a
+        transformação leria uma raw com lotes faltando.
+        """
+        import landing_zone
+
+        catalogo = yaml.safe_load(
+            (RAIZ / "catalogo/sistemas/compras_gov.yml").read_text()
+        )
+        dag = dagbag.dags[catalogo["entidades"][entidade]["dag"]]
+        asset = landing_zone.asset_raw("compras_gov", entidade)
+        emissoras = [t for t in dag.tasks if asset in t.outlets]
+        assert len(emissoras) == 1, [t.task_id for t in emissoras]
+        anteriores = emissoras[0].get_flat_relative_ids(upstream=True)
+        assert anteriores == {t.task_id for t in dag.tasks} - {emissoras[0].task_id}

@@ -32,13 +32,13 @@ def _get_intervalo(context: dict) -> tuple[str, str]:
     catchup=False,
     default_args=default_args,
     description="Ingere itens de contratos por órgão da API do Compras.gov.br para compras_gov.raw_contratos_item.",
-    tags=["sistema:compras_gov", "dominio:contratos"],
+    tags=["sistema:compras_gov", "dominio:contratos", "orgao:mgi", "camada:raw"],
 )
 def contratos_item_dag() -> None:
     @task
     def get_orgao_blocks() -> list[list[str]]:
         try:
-            orgaos = distinct_raw_values(SISTEMA, "orgao", "codigoorgao")
+            orgaos = distinct_raw_values(SISTEMA, "orgao", "codigoOrgao")
         except Exception as exc:
             raise RuntimeError(
                 "Entidade 'orgao' ainda não está na zona raw. "
@@ -58,11 +58,13 @@ def contratos_item_dag() -> None:
     def ingest_orgaos(codigos_orgao: list[str], **context: dict) -> dict:
         data_inicial, data_final = _get_intervalo(context)
         api = ClienteComprasGov()
-        itens = 0
+        total_registros = 0
+        api_total = 0
 
         for codigo_orgao in codigos_orgao:
-            itens_orgao = 0
-            for batch, _ in api.iter_pages(
+            registros_orgao = 0
+            api_total_orgao = None
+            for batch, api_total_orgao in api.iter_pages(
                 "/modulo-contratos/2_consultarContratosItem",
                 {
                     "codigoOrgao": codigo_orgao,
@@ -82,25 +84,55 @@ def contratos_item_dag() -> None:
                         "contratoitemexcluido",
                     ],
                 )
-                itens_orgao += len(batch)
+                registros_orgao += len(batch)
+
+            if api_total_orgao is None:
+                raise RuntimeError(
+                    f"A API não retornou uma resposta válida para o órgão {codigo_orgao}."
+                )
 
             logging.info(
-                "Órgão %s %s→%s: itens=%s",
+                "Órgão %s %s→%s: registros=%s api_total=%s",
                 codigo_orgao,
                 data_inicial,
                 data_final,
-                itens_orgao,
+                registros_orgao,
+                api_total_orgao,
             )
-            itens += itens_orgao
+            total_registros += registros_orgao
+            # O total da API se repete em cada página: somar uma vez por órgão.
+            api_total += api_total_orgao
 
-        return {"itens": itens}
+        return {
+            "registros": total_registros,
+            "api_total": api_total,
+            "orgaos_processados": len(codigos_orgao),
+        }
 
     @task
     def validate(results: Any) -> None:
-        total_itens = sum(r["itens"] for r in results)
+        total_registros = sum(result["registros"] for result in results)
+        api_total = sum(result["api_total"] for result in results)
+        total_orgaos = sum(result["orgaos_processados"] for result in results)
         logging.info(
-            "Contratos item total: itens=%s blocos=%s", total_itens, len(results)
+            "Contratos item: órgãos processados=%s, total de registros=%s, api_total=%s",
+            total_orgaos,
+            total_registros,
+            api_total,
         )
+        if total_registros != api_total:
+            logging.warning(
+                "[%s] Divergência: total de registros=%s api_total=%s",
+                "/modulo-contratos/2_consultarContratosItem",
+                total_registros,
+                api_total,
+            )
+        else:
+            logging.info(
+                "[%s] Validação OK: total de registros=%s",
+                "/modulo-contratos/2_consultarContratosItem",
+                total_registros,
+            )
 
     blocks = get_orgao_blocks()
     results = ingest_orgaos.expand(codigos_orgao=blocks)

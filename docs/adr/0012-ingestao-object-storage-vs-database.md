@@ -67,7 +67,7 @@ Elementos concretos da decisão:
   reprocessamento e retenção operações de prefixo:
 
   ```text
-  {bucket}/{sistema_origem}/{entidade}/{ano}/{mes}/{dia}/{run_id}.parquet
+  {bucket}/{sistema_origem}/{entidade}/{ano}/{mes}/{dia}/{run_id}--lote-{lote_id}.parquet
   ```
 
   `{sistema_origem}` e `{entidade}` são os mesmos nomes usados pelas DAGs de

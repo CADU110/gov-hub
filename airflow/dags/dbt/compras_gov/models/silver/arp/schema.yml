@@ -1,0 +1,103 @@
+version: 2
+
+models:
+  - name: silver_compras_gov_arp
+    description: >-
+      Silver inicial das Atas de Registro de Preço para validar o fluxo dbt.
+      Preserva todas as linhas e valores da Bronze, inclusive repetições entre
+      ingestões, sem limpeza, deduplicação ou conversão de tipos. Os nomes das
+      colunas são apresentados em snake_case. Ainda não é uma base tratada
+      para consumo analítico.
+    meta:
+      owner: "@GovHub-br/oss"
+      sistema_origem: compras_gov
+      camada: silver
+      classificacao: publico
+    # Contrato da Silver inicial: mesmas linhas e valores da Bronze, só com os
+    # nomes em snake_case. Saem quando a Silver passar a tratar o dado.
+    data_tests:
+      - gov_bricks.mesma_contagem:
+          arguments:
+            comparar_com: ref("arp")
+      - gov_bricks.mesmo_conteudo_em_snake_case:
+          arguments:
+            comparar_com: ref("arp")
+    columns:
+      - name: numero_ata_registro_preco
+        description: Número da ata de registro de preço informado pela fonte.
+        meta: {classificacao: publico}
+      - name: codigo_unidade_gerenciadora
+        description: Código da unidade responsável por gerenciar a ata, sem normalização.
+        meta: {classificacao: publico}
+      - name: nome_unidade_gerenciadora
+        description: Nome da unidade responsável por gerenciar a ata.
+        meta: {classificacao: publico}
+      - name: codigo_orgao
+        description: Código do órgão associado à ata na fonte.
+        meta: {classificacao: publico}
+      - name: nome_orgao
+        description: Nome do órgão associado à ata na fonte.
+        meta: {classificacao: publico}
+      - name: link_ata_pncp
+        description: Endereço da ata no Portal Nacional de Contratações Públicas.
+        meta: {classificacao: publico}
+      - name: link_compra_pncp
+        description: Endereço da compra no Portal Nacional de Contratações Públicas.
+        meta: {classificacao: publico}
+      - name: numero_compra
+        description: Número da compra à qual a ata está vinculada.
+        meta: {classificacao: publico}
+      - name: ano_compra
+        description: Ano da compra, preservado no tipo recebido na Bronze.
+        meta: {classificacao: publico}
+      - name: codigo_modalidade_compra
+        description: Código da modalidade da compra informado pela fonte.
+        meta: {classificacao: publico}
+      - name: nome_modalidade_compra
+        description: Denominação da modalidade da compra informada pela fonte.
+        meta: {classificacao: publico}
+      - name: data_assinatura
+        description: Data de assinatura da ata, ainda sem conversão para tipo de data.
+        meta: {classificacao: publico}
+      - name: data_vigencia_inicial
+        description: Início da vigência da ata, preservado como recebido.
+        meta: {classificacao: publico}
+      - name: data_vigencia_final
+        description: Fim da vigência da ata, preservado como recebido.
+        meta: {classificacao: publico}
+      - name: valor_total
+        description: Valor total da ata em reais informado pela fonte, sem recálculo.
+        meta: {classificacao: publico}
+      - name: status_ata
+        description: Situação da ata informada pela fonte, sem recodificação.
+        meta: {classificacao: publico}
+      - name: objeto
+        description: Descrição do objeto da ata de registro de preço.
+        meta: {classificacao: publico}
+      - name: quantidade_itens
+        description: Quantidade de itens da ata informada pela fonte.
+        meta: {classificacao: publico}
+      - name: data_hora_atualizacao
+        description: Data e hora da atualização na origem, preservadas como recebidas.
+        meta: {classificacao: publico}
+      - name: data_hora_inclusao
+        description: Data e hora da inclusão na origem, preservadas como recebidas.
+        meta: {classificacao: publico}
+      - name: data_hora_exclusao
+        description: Data e hora da exclusão na origem, quando informadas.
+        meta: {classificacao: publico}
+      - name: ata_excluido
+        description: Indicador de exclusão da ata; registros excluídos ainda não são filtrados.
+        meta: {classificacao: publico}
+      - name: numero_controle_pncp_ata
+        description: Identificador de controle da ata no PNCP.
+        meta: {classificacao: publico}
+      - name: numero_controle_pncp_compra
+        description: Identificador de controle da compra no PNCP.
+        meta: {classificacao: publico}
+      - name: id_compra
+        description: Identificador da compra associado à ata, sem normalização.
+        meta: {classificacao: publico}
+      - name: dt_ingest
+        description: Marca de ingestão da raw preservada pela Bronze, sem conversão de tipo.
+        meta: {classificacao: publico}

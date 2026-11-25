@@ -7,8 +7,10 @@ from http import HTTPStatus
 
 class ClienteBase:
     DEFAULT_TIMEOUT = 10
-    DEFAULT_MAX_RETRIES = 3
-    DEFAULT_SLEEP_SECONDS = 2
+    DEFAULT_MAX_RETRIES = 5
+    DEFAULT_BACKOFF_SECONDS = 5
+    DEFAULT_MAX_BACKOFF_SECONDS = 60
+    TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 
     def __init__(self, base_url: str, headers: Optional[dict] = None) -> None:
         self.base_url = base_url
@@ -46,21 +48,68 @@ class ClienteBase:
                     f"{response.status_code}"
                 )
                 return HTTPStatus(response.status_code), response.json()
-            except httpx.HTTPError as e:
-                status = response.status_code if response else "Unknown"
-                logging.warning(
-                    f"[cliente_base.py] API failed with status {status} on "
-                    f"attempt {attempt + 1}. Error: {str(e)}"
-                )
-                if attempt < self.DEFAULT_MAX_RETRIES:
-                    time.sleep(attempt**2 * self.DEFAULT_SLEEP_SECONDS)
-                else:
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code
+                if status not in self.TRANSIENT_STATUS_CODES:
                     logging.error(
-                        f"[cliente_base.py] API failed after "
-                        f"{self.DEFAULT_MAX_RETRIES} attempts. Error: {str(e)}"
+                        "[cliente_base.py] API failed with non-transient status %s: %s",
+                        status,
+                        str(e),
+                    )
+                    raise Exception(
+                        "API request failed with a non-transient error"
+                    ) from e
+                if attempt == self.DEFAULT_MAX_RETRIES:
+                    logging.error(
+                        "[cliente_base.py] API failed after %s retries. Error: %s",
+                        self.DEFAULT_MAX_RETRIES,
+                        str(e),
                     )
                     raise Exception(
                         "API failed after the maximum number of attempts!"
                     ) from e
+
+                retry_after = e.response.headers.get("Retry-After", "")
+                backoff = min(
+                    self.DEFAULT_BACKOFF_SECONDS * 2**attempt,
+                    self.DEFAULT_MAX_BACKOFF_SECONDS,
+                )
+                retry_after_segundos = (
+                    int(retry_after) if str(retry_after).isdigit() else 0
+                )
+                espera = min(
+                    max(backoff, retry_after_segundos),
+                    self.DEFAULT_MAX_BACKOFF_SECONDS,
+                )
+                logging.warning(
+                    "[cliente_base.py] API returned status %s on attempt %s; "
+                    "retrying in %ss",
+                    status,
+                    attempt + 1,
+                    espera,
+                )
+                time.sleep(espera)
+            except httpx.TransportError as e:
+                if attempt == self.DEFAULT_MAX_RETRIES:
+                    logging.error(
+                        "[cliente_base.py] API failed after %s retries. Error: %s",
+                        self.DEFAULT_MAX_RETRIES,
+                        str(e),
+                    )
+                    raise Exception(
+                        "API failed after the maximum number of attempts!"
+                    ) from e
+
+                espera = min(
+                    self.DEFAULT_BACKOFF_SECONDS * 2**attempt,
+                    self.DEFAULT_MAX_BACKOFF_SECONDS,
+                )
+                logging.warning(
+                    "[cliente_base.py] Transport error on attempt %s; retrying in %ss: %s",
+                    attempt + 1,
+                    espera,
+                    str(e),
+                )
+                time.sleep(espera)
 
         return HTTPStatus.INTERNAL_SERVER_ERROR, None

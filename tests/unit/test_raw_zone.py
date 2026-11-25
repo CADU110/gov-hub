@@ -129,10 +129,11 @@ class TestEscritaEmObjectStorage:
                 run_id="manual__2026-08-25",
                 run_date=date(2026, 8, 25),
             )
-
-        assert destino == (
-            "data-lake/compras_gov/orgao/2026/08/25/manual__2026-08-25.parquet"
+        assert destino is not None
+        assert destino.startswith(
+            "data-lake/compras_gov/orgao/2026/08/25/" "manual__2026-08-25--lote-"
         )
+        assert destino.endswith(".parquet")
         dados = escrever.call_args[0][0]
         assert dados.height == 2
         assert "dt_ingest" in dados.columns
@@ -156,6 +157,36 @@ class TestEscritaEmObjectStorage:
         assert dados["credor_obj"].to_list() == [{"nome": "João"}]
         assert dados["links"].to_list() == [["a", "b"]]
 
+    def test_duas_escritas_na_mesma_run_geram_arquivos_distintos(
+        self,
+        backend_object_storage,
+    ) -> None:
+        with (
+            patch.object(landing_zone, "write_parquet") as escrever,
+            patch.object(landing_zone, "get_bucket", return_value="data-lake"),
+        ):
+            escrever.side_effect = lambda df, caminho: caminho
+
+            primeiro = landing_zone.write_raw(
+                "compras_gov",
+                "orgao",
+                list(REGISTROS),
+                run_id="manual__2026-08-25",
+                run_date=date(2026, 8, 25),
+            )
+            segundo = landing_zone.write_raw(
+                "compras_gov",
+                "orgao",
+                list(REGISTROS),
+                run_id="manual__2026-08-25",
+                run_date=date(2026, 8, 25),
+            )
+
+        assert primeiro is not None
+        assert segundo is not None
+        assert primeiro != segundo
+        assert escrever.call_count == 2
+
     def test_sem_contexto_de_execucao_ainda_grava(self, backend_object_storage) -> None:
         """Fora de uma execução do Airflow o arquivo sai com run_id de horário."""
         with (
@@ -166,6 +197,20 @@ class TestEscritaEmObjectStorage:
             destino = landing_zone.write_raw("compras_gov", "orgao", list(REGISTROS))
         assert destino is not None
         assert "sem-run-id-" in destino
+
+
+class TestAssetDaRaw:
+    def test_nome_identifica_sistema_e_entidade(self) -> None:
+        asset = landing_zone.asset_raw("compras_gov", "arp")
+        assert asset.name == "raw.compras_gov.arp"
+        assert asset != landing_zone.asset_raw("compras_gov", "arp_item")
+
+    def test_nao_depende_do_backend(self, monkeypatch) -> None:
+        """Trocar o RAW_BACKEND não pode quebrar o agendamento da transformação."""
+        monkeypatch.setenv("RAW_BACKEND", "warehouse")
+        no_banco = landing_zone.asset_raw("compras_gov", "arp")
+        monkeypatch.setenv("RAW_BACKEND", "object_storage")
+        assert landing_zone.asset_raw("compras_gov", "arp") == no_banco
 
 
 class TestLoteVazio:

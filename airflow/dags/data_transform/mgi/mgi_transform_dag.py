@@ -58,6 +58,11 @@ mgi_transform_dag = DbtDag(
         # testes no fim: assim um defeito na Silver interrompe o ramo afetado
         # antes de a Gold ser construída em cima de dado ruim.
         test_behavior=TestBehavior.AFTER_EACH,
+        # Nós com tag `duckdb` leem Parquet com funções do DuckDB e falhariam no
+        # PostgreSQL deste target; rodam na duckdb_mgi_transform_dag. Eles
+        # continuam habilitados, e não `enabled=false`, para que um modelo daqui
+        # possa dar ref() neles.
+        exclude=["tag:duckdb"],
     ),
     # Depois da janela de ingestão (as DAGs do compras_gov rodam 01:00–02:00).
     schedule="0 6 * * *",

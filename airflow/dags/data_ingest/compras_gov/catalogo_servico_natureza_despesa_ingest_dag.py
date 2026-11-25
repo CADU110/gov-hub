@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from airflow.sdk import dag, task
@@ -26,6 +26,13 @@ default_args = {
 }
 
 
+def _run_date(context: dict) -> date:
+    dag_run = context["dag_run"]
+    fallback = dag_run.logical_date or dag_run.run_after
+    inicio = context.get("data_interval_start") or fallback
+    return inicio.date()
+
+
 @dag(
     dag_id="catalogo_servico_natureza_despesa_ingest_dag",
     schedule="0 3 * * 0",
@@ -36,7 +43,7 @@ default_args = {
         "Ingere naturezas de despesa de serviços do catálogo do Compras.gov.br para "
         "compras_gov.raw_natureza_despesa_servico."
     ),
-    tags=["sistema:compras_gov", "dominio:servico"],
+    tags=["sistema:compras_gov", "dominio:servico", "orgao:mgi"],
 )
 def catalogo_servico_natureza_despesa_dag() -> None:
     @task
@@ -50,8 +57,9 @@ def catalogo_servico_natureza_despesa_dag() -> None:
         return page_starts(total, BLOCK_SIZE)
 
     @task
-    def fetch_block(pagina_inicio: int) -> dict:
+    def fetch_block(pagina_inicio: int, **context: dict) -> dict:
         api = ClienteComprasGov()
+        run_date = _run_date(context)
         ingeridos = 0
         api_total = 0
         for pagina in range(pagina_inicio, pagina_inicio + BLOCK_SIZE):
@@ -67,7 +75,7 @@ def catalogo_servico_natureza_despesa_dag() -> None:
             api_total = resp.get("totalRegistros", 0)
             if not data:
                 break
-            write_raw(SISTEMA, ENTIDADE, data, primary_key=PK)
+            write_raw(SISTEMA, ENTIDADE, data, primary_key=PK, run_date=run_date)
             ingeridos += len(data)
             if resp.get("paginasRestantes", 0) == 0:
                 break

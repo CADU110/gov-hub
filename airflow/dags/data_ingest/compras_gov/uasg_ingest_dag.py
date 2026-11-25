@@ -2,7 +2,9 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import Any
+
 from airflow.sdk import dag, task
+
 from batching import page_starts
 from cliente_compras_gov import ClienteComprasGov
 from landing_zone import write_raw
@@ -10,10 +12,12 @@ from landing_zone import write_raw
 SISTEMA = "compras_gov"
 PAGE_SIZE = 500
 BLOCK_SIZE = 15
+
 ENDPOINT = "/modulo-uasg/1_consultarUasg"
 PARAMS = {"statusUasg": "true"}
 ENTIDADE = "uasg"
 PK = ["codigouasg"]
+
 default_args = {
     "owner": "mgi",
     "queue": "mgi",
@@ -28,8 +32,10 @@ default_args = {
     start_date=datetime(2024, 1, 1),
     catchup=False,
     default_args=default_args,
-    description="Ingere UASGs (unidades gestoras) da API do Compras.gov.br para compras_gov.raw_uasg.",
-    tags=["sistema:compras_gov", "dominio:uasg"],
+    description=(
+        "Ingere UASGs (unidades gestoras) da API do Compras.gov.br para a zona raw."
+    ),
+    tags=["sistema:compras_gov", "camada:raw", "dominio:uasg"],
 )
 def uasg_dag() -> None:
     @task
@@ -42,43 +48,59 @@ def uasg_dag() -> None:
         logging.info("[%s] Total de páginas: %s", ENDPOINT, total)
         return page_starts(total, BLOCK_SIZE)
 
-    @task
+    @task(max_active_tis_per_dag=1)
     def fetch_block(pagina_inicio: int) -> dict:
         api = ClienteComprasGov()
-        ingeridos = 0
-        api_total = 0
+        total_registros = 0
+        # None distingue resposta sem total de uma consulta válida vazia.
+        api_total = None
         for pagina in range(pagina_inicio, pagina_inicio + BLOCK_SIZE):
-            time.sleep(1)
+            time.sleep(3)
             _, resp = api.request(
                 "GET",
                 ENDPOINT,
                 params={**PARAMS, "pagina": pagina, "tamanhoPagina": PAGE_SIZE},
             )
             if not isinstance(resp, dict):
+                api_total = None
+                break
+            api_total = resp.get("totalRegistros")
+            if api_total is None:
                 break
             data = [r for r in resp.get("resultado", []) if r is not None]
-            api_total = resp.get("totalRegistros", 0)
             if not data:
                 break
-            write_raw(SISTEMA, ENTIDADE, data, primary_key=PK)
-            ingeridos += len(data)
+            write_raw(
+                SISTEMA,
+                ENTIDADE,
+                data,
+                primary_key=PK,
+            )
+            total_registros += len(data)
             if resp.get("paginasRestantes", 0) == 0:
                 break
-        return {"ingeridos": ingeridos, "api_total": api_total}
+        if api_total is None:
+            raise RuntimeError(
+                f"[{ENDPOINT}] A API não retornou resposta válida: página={pagina}."
+            )
+        return {"registros": total_registros, "api_total": api_total}
 
     @task
     def validate(results: Any) -> None:
-        total_ingerido = sum(r["ingeridos"] for r in results)
-        api_total = results[0]["api_total"] if results else 0
-        if total_ingerido != api_total:
-            logging.warning(
-                "[%s] Divergência: ingeridos=%s api_total=%s",
-                ENDPOINT,
-                total_ingerido,
-                api_total,
+        results = list(results)
+        total_registros = sum(result["registros"] for result in results)
+        if not results or any(result["api_total"] is None for result in results):
+            raise RuntimeError(f"[{ENDPOINT}] A API não retornou um total válido.")
+        api_total = results[0]["api_total"]
+        if total_registros != api_total:
+            raise RuntimeError(
+                f"[{ENDPOINT}] Resposta incompleta: "
+                f"gravados={total_registros}, api_total={api_total}."
             )
         else:
-            logging.info("[%s] Validação OK: ingeridos=%s", ENDPOINT, total_ingerido)
+            logging.info(
+                "[%s] Validação OK: total de registros=%s", ENDPOINT, total_registros
+            )
 
     starts = get_page_starts()
     results = fetch_block.expand(pagina_inicio=starts)

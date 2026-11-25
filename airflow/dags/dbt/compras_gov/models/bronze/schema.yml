@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: arp
+    description: >-
+      Camada Bronze das Atas de Registro de Preço do Compras.gov.br.
+      Preserva os registros retornados pela API sem aplicação de regras
+      de negócio.
+    meta:
+      owner: "@GovHub-br/oss"
+      sistema_origem: compras_gov
+      camada: bronze
+      classificacao: publico
+    columns:
+      - name: numeroAtaRegistroPreco
+        description: Número da Ata de Registro de Preço.
+        meta:
+          classificacao: publico
+
+      - name: idCompra
+        description: Identificador da compra associada à ata.
+        meta:
+          classificacao: publico
+
+      - name: dt_ingest
+        description: Data e hora da ingestão do registro.
+        meta:
+          classificacao: publico
