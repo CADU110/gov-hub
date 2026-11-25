@@ -283,6 +283,50 @@ execução (o `dt_ingest` é atualizado pelo upsert). O `object_storage` (um
 Parquet por contrato e por run, com a `observacao` inteira) é coberto por
 `test_cada_contrato_tem_arquivo_proprio_no_object_storage`.
 
+### Arquivos: `id` sozinho, só metadados, medição contra a API pendente
+
+`GET /api/contrato/{contrato_id}/arquivos` é atendido por
+`ContratoController::arquivosPorContratoId`, que lista a tabela
+`contrato_arquivos` filtrando por `contrato_id` e por UG sem sigilo, e
+serializa cada linha com `Contratoarquivo::arquivoAPI` (gitlab.com/comprasnet/
+contratos, branch `master`, lido em **2026-11-25**). Os nove campos são `id`,
+`contrato_id`, `tipo`, `processo`, `sequencial_documento`, `descricao`,
+`path_arquivo`, `origem` e `link_sei`; nenhum é data, objeto ou lista.
+
+Daí as decisões da `contrato_arquivo_ingest_dag`:
+
+- a chave primária é só `id`: é a chave da própria `contrato_arquivos`, e cada
+  linha dessa tabela tem um único `contrato_id`. Ao contrário dos empenhos, não
+  há tabela de vínculo que repita o mesmo `id` em vários contratos;
+- o payload já traz `contrato_id`; a DAG compara com o da URL em toda linha e
+  falha antes da escrita se divergirem, como no item e no cronograma;
+- contrato sem anexo (`200 []`) é comum na amostra da issue (0 a 11 por
+  contrato): conta como contrato vazio e não interrompe o bloco;
+- só a listagem é chamada: `path_arquivo` e `link_sei` seguem como texto, e o
+  binário não é baixado (issue #27).
+
+Particularidades do código que a Silver precisa tratar:
+
+- `origem` é calculado a partir de `$this->arquivo`, atributo que o modelo não
+  tem (o campo é `arquivos`). A comparação com `'0'` nunca é verdadeira, e o
+  campo deve vir sempre `"SEI"`, mesmo para arquivo enviado pelo sistema. Não
+  use `origem`; `link_sei` preenchido é o indicador confiável;
+- `path_arquivo` é `APP_URL + '/storage/' + arquivos`, e `arquivos` tem cast
+  para array no modelo. Se a coluna guardar uma lista, a concatenação produz
+  um caminho inválido (ou erro na resposta). Confirmar contra o dado;
+- o modelo usa `SoftDeletes`: anexo excluído some da API, mas continua na raw do
+  backend `warehouse`, porque o upsert não apaga. A Silver não consegue
+  distinguir anexo excluído de anexo antigo só pela raw.
+
+**Pendente**: a medição contra a API (contagem, `id` distintos, amostra e
+reexecução no backend `warehouse`). Em 2026-11-25, `contratos.comprasnet.gov.br`
+recusou toda conexão a partir da rede de desenvolvimento (`Connection reset by
+peer` logo após o TLS, inclusive em `/`). No compose, a seleção já foi
+conferida: com o escopo local `["17000"]`, `get_contract_blocks` leu 870
+contratos das raws de ativos e inativos e o `INGEST_MAX_CONTRATOS=50` os
+reduziu a 50, em 2 blocos — os mesmos contratos das medições de item e
+cronograma.
+
 ### Sobre o código do MGI: 46000, não 48000
 
 Na API do Contratos.gov.br, o órgão **46000** está presente na lista de órgãos
