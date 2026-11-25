@@ -56,8 +56,11 @@ sources:
       - name: contrato_despesa_acessoria
         identifier: raw_contrato_despesa_acessoria
         description: >
-            Despesas acessórias vinculadas ao contrato. Granularidade: uma linha por
-            despesa acessória de um contrato.
+            Despesas acessórias vinculadas ao contrato (condomínio, tributo, taxa,
+            seguro ou garantia estendida), com recorrência, vencimento e valor. tipo_id
+            e recorrencia_id trazem a descrição do código, não o identificador, e valor
+            vem como texto pt-BR. Granularidade: uma linha por despesa acessória de um
+            contrato.
         meta:
           classificacao: publico
           dag_ingestao: contrato_despesa_acessoria_ingest_dag

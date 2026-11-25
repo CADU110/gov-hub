@@ -277,7 +277,10 @@ entidades:
 
   contrato_despesa_acessoria:
     descricao: >-
-      Despesas acessórias vinculadas ao contrato.
+      Despesas acessórias vinculadas ao contrato (condomínio, tributo, taxa,
+      seguro ou garantia estendida), com recorrência, vencimento e valor.
+      tipo_id e recorrencia_id trazem a descrição do código, não o
+      identificador, e valor vem como texto pt-BR.
     granularidade: uma linha por despesa acessória de um contrato
     dominio: contratacoes
     dag: contrato_despesa_acessoria_ingest_dag
@@ -285,7 +288,12 @@ entidades:
     chave_primaria: [id]
     classificacao: publico
     chaves: []
-    # Fase 4: mesma ressalva de contrato_terceirizado — estrutura não observada.
+    # Fase 4: a API devolveu só listas vazias, e a estrutura saiu do código-fonte
+    # público (Contratodespesaacessoria::despesaAcessoriaAPI, gitlab.com/
+    # comprasnet/contratos, master em adb9f9ee, lido em 2026-11-25). Lá, id é a
+    # chave serial da tabela contratodespesaacessoria, única entre contratos.
+    # Contrato de unidade sigilosa não aparece, e despesa excluída (soft delete)
+    # some da API sem aviso.
 
   contrato_ocorrencia:
     descricao: >-
