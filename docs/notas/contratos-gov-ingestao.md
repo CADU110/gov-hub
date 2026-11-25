@@ -283,6 +283,58 @@ execução (o `dt_ingest` é atualizado pelo upsert). O `object_storage` (um
 Parquet por contrato e por run, com a `observacao` inteira) é coberto por
 `test_cada_contrato_tem_arquivo_proprio_no_object_storage`.
 
+### Despesas acessórias: estrutura lida do código-fonte
+
+Segundo a issue #31, `GET /api/contrato/{contrato_id}/despesas_acessorias` não
+pagina nem filtra por data, e o levantamento feito na abertura da issue, em
+2026-09-15, encontrou `[]` nos seis contratos consultados. Nenhum campo do
+payload foi visto, e uma nova tentativa a partir do ambiente onde a DAG foi
+escrita, em 2026-11-25, teve a conexão recusada pela API logo depois do
+handshake TLS, em qualquer caminho e de duas redes diferentes.
+
+A estrutura saiu do código-fonte público do Comprasnet Contratos
+(gitlab.com/comprasnet/contratos, `master` em `adb9f9ee`, lido em 2026-11-25).
+A rota chama `ContratoController@despesasAcessoriasPorContratoId`, e cada linha
+vem de `Contratodespesaacessoria::despesaAcessoriaAPI()`:
+
+| Campo | Conteúdo |
+|---|---|
+| `id` | chave serial da tabela `contratodespesaacessoria`, única entre contratos |
+| `contrato_id` | inteiro |
+| `tipo_id` | descrição do tipo (Condomínio, Tributo, Taxa, Seguro, Garantia Extendida), não o código |
+| `recorrencia_id` | descrição da recorrência (Anual, Mensal, Única), não o código |
+| `descricao_complementar` | texto livre, pode ser nulo |
+| `vencimento` | data, pode ser nula |
+| `valor` | texto pt-BR com duas casas (`number_format`), como `"1.234,56"` |
+
+O mesmo código mostra três coisas que a issue não registra. O método lê
+`dt_alteracao_min` e `dt_alteracao_max` opcionais e, quando vêm, filtra por
+`updated_at`. O filtro não foi testado contra a API e a DAG não o usa. Despesa
+de contrato cuja unidade tem sigilo não aparece. E o modelo usa exclusão lógica
+(`SoftDeletes`), então despesa excluída some da API, e a raw continua com a
+última versão gravada dela.
+
+A `contrato_despesa_acessoria_ingest_dag` segue o molde do cronograma e grava o
+payload como vier. A chave primária `id` tem apoio no código-fonte, mas não foi
+conferida contra dado real.
+
+Duas proteções cobrem essa lacuna. A DAG compara o `contrato_id` do payload com o
+da URL em toda linha, e falha antes da escrita se divergirem ou se faltar `id`
+ou houver `id` repetido no mesmo lote. Contrato sem despesa acessória conta como
+vazio e não interrompe o bloco, e uma execução em que todos os contratos vêm
+vazios termina com total zero.
+
+`write_raw` não cria a tabela quando recebe lista vazia. Se a API continuar
+vazia, `raw_contrato_despesa_acessoria` não existe, e o source Bronze que o
+catálogo declara aponta para uma tabela ausente. Nesse caso a DAG deve ficar
+fora do `dag_selector`, com o motivo registrado aqui, como a issue #31 prevê.
+
+Falta uma amostra com dados para conferir contra a API a chave primária, o
+formato dos campos e a classificação da entidade. Ela continua `publico`,
+porque nenhum campo do serializador identifica pessoa física. A exceção possível
+é `descricao_complementar`, que é texto livre e deve ser olhada na primeira
+amostra.
+
 ### Sobre o código do MGI: 46000, não 48000
 
 Na API do Contratos.gov.br, o órgão **46000** está presente na lista de órgãos
@@ -306,3 +358,5 @@ ADR-0019/0020). Fica o dado para quem for fechar a pendência.
   `contrato_despesa_acessoria`, `contrato_ocorrencia` e
   `contrato_domicilio_bancario` vieram vazias em toda a amostra: a chave primária
   declarada no catálogo para elas é hipótese, a confirmar ao implementar a DAG.
+  Para `contrato_despesa_acessoria` a DAG existe, mas a confirmação depende de a
+  API responder com dados.
