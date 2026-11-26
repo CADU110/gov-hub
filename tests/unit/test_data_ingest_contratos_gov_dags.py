@@ -419,3 +419,35 @@ class TestUgsQueZeraram:
             validacao([{"contratos": 5, "ugs_vazias": [UG_A]}], [UG_B])
 
         assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+class TestDagSelector:
+    """A DAG de terceirizados fica fora do allowlist (issue #30).
+
+    A entidade veio vazia em toda a amostra observada e traz dado pessoal, e a
+    issue pede para entregar a DAG sem carregar enquanto for assim. A linha do
+    `dag_selector` é uma regex com lookahead, e não uma lista de arquivos, para
+    que a exclusão valha só para esta DAG e as próximas da pasta entrem sem
+    editar o allowlist. Estes testes guardam as três partes dessa escolha.
+    """
+
+    TERCEIRIZADO = "contrato_terceirizado_ingest_dag.py"
+
+    @pytest.fixture
+    def selector(self):
+        from dag_discovery import DagSelector
+
+        return DagSelector(dags_folder=DAGS_FOLDER.parents[1])
+
+    def test_terceirizado_nao_carrega(self, selector) -> None:
+        assert not selector.is_included(DAGS_FOLDER / self.TERCEIRIZADO)
+
+    def test_as_demais_dags_da_pasta_carregam(self, selector) -> None:
+        for caminho in sorted(DAGS_FOLDER.glob("*.py")):
+            if caminho.name == self.TERCEIRIZADO:
+                continue
+            assert selector.is_included(caminho), caminho.name
+
+    def test_dag_futura_da_pasta_carrega_sem_editar_o_selector(self, selector) -> None:
+        """O lookahead não pode virar uma lista de exceções a manter à mão."""
+        assert selector.is_included(DAGS_FOLDER / "contrato_preposto_ingest_dag.py")

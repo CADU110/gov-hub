@@ -2,7 +2,14 @@
 # O que está listado aqui é INCLUÍDO, o resto é ignorado no parsing.
 
 data_ingest/compras_gov/
-data_ingest/contratos_gov/
+# contratos_gov: toda a pasta, menos contrato_terceirizado. A entidade veio
+# vazia em toda a amostra observada (`[]` em 6 contratos, 2026-09-15) e contém
+# dado pessoal, então a DAG é entregue sem carregar no deployment, como a issue
+# #30 pede. A linha é lida como regex: o lookahead tira só esse arquivo e
+# mantém os outros, inclusive os que entrarem depois. Para ligar a DAG, apague
+# o lookahead; o motivo e a condição estão em
+# docs/notas/contratos-gov-ingestao.md.
+data_ingest/contratos_gov/(?!contrato_terceirizado_ingest_dag\.py)
 data_transform/mgi/
 data_publish/mgi/
 data_report/mgi/
