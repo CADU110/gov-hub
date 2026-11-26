@@ -327,6 +327,20 @@ contratos das raws de ativos e inativos e o `INGEST_MAX_CONTRATOS=50` os
 reduziu a 50, em 2 blocos — os mesmos contratos das medições de item e
 cronograma.
 
+A medição ficou reproduzível, para ser refeita assim que a API aceitar conexão:
+
+- `uv run python -m scripts.contratos_gov.medir_subrecurso arquivos --contratos
+  <ids> --distribuicao origem,tipo --preenchido link_sei,path_arquivo` imprime a
+  tabela no formato das seções de item e cronograma, a distribuição de `origem`
+  (confirma ou não que vem sempre `"SEI"`) e quantas linhas têm `link_sei`. O
+  script serve para qualquer sub-recurso por contrato e não imprime valores do
+  payload além dos campos pedidos em `--distribuicao`;
+- `make test-integration` roda `tests/integration/test_contrato_arquivo_flow.py`:
+  reexecução sem duplicar no `warehouse` (upsert por `id`, `dt_ingest`
+  atualizado), estrutura de nove campos planos, `id` único entre contratos e raw
+  igual à API na mesma data. A parte da API faz skip quando a conexão falha; os
+  contratos vêm de `CONTRATOS_GOV_AMOSTRA`.
+
 ### Sobre o código do MGI: 46000, não 48000
 
 Na API do Contratos.gov.br, o órgão **46000** está presente na lista de órgãos
