@@ -341,6 +341,16 @@ A medição ficou reproduzível, para ser refeita assim que a API aceitar conex�
   igual à API na mesma data. A parte da API faz skip quando a conexão falha; os
   contratos vêm de `CONTRATOS_GOV_AMOSTRA`.
 
+Tentada de novo em **2026-11-26**, de outra rede: mesmo resultado, agora com o
+ponto da falha isolado. O `curl` fecha o handshake (`SSL/TLS handshake
+complete`), envia a requisição inteira (`Request completely sent off`) e só
+então recebe `Connection was reset`, sem um byte de resposta; `/` e
+`/docs/api-docs.json` se comportam igual, e o navegador também não carrega.
+Logo não é DNS (o host resolve em 161.148.117.75), nem porta fechada, nem TLS:
+o reset vem depois do pedido, do outro lado. Duas redes diferentes, três dias
+de intervalo, o mesmo sintoma — a medição não espera ajuste local nenhum, só
+a API voltar a responder.
+
 ### Sobre o código do MGI: 46000, não 48000
 
 Na API do Contratos.gov.br, o órgão **46000** está presente na lista de órgãos
