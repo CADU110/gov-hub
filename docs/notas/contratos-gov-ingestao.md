@@ -401,6 +401,15 @@ Particularidades que a Silver precisa tratar, lendo o serializador:
   `'NaN'`. Corrigido nesta branch (`fix(cliente_postgres)`), com
   `test_warehouse_preserva_inteiro_e_nulo` cobrindo o caso.
 
+Conferido no backend `warehouse` em **2026-11-26**, com o Postgres do compose:
+`test_reexecucao_nao_duplica_e_atualiza` e
+`test_colunas_chegam_como_vieram_da_fonte` passam — duas execuções não duplicam
+(upsert por `id`, `dt_ingest` atualizado) e as colunas chegam como vieram da
+fonte, inteiro e nulo incluídos. Os quatro testes que batem na API ficaram em
+skip, pelo mesmo motivo da medição. Na mesma execução os dois equivalentes de
+`contrato_arquivo` também passaram, o que confirma que a correção de tipos do
+`cliente_postgres` resolve a falha registrada na seção de arquivos.
+
 **A DAG é entregue fora do `dag_selector`**, como a issue #30 pede para o caso
 de a entidade continuar vazia. O motivo: ligá-la hoje significaria milhares de
 chamadas semanais para uma entidade sem nenhuma linha observada, gravando dado
