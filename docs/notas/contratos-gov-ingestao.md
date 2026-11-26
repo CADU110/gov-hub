@@ -341,6 +341,85 @@ A medição ficou reproduzível, para ser refeita assim que a API aceitar conex�
   igual à API na mesma data. A parte da API faz skip quando a conexão falha; os
   contratos vêm de `CONTRATOS_GOV_AMOSTRA`.
 
+### Terceirizados: estrutura tirada do código, dado pessoal e DAG desligada
+
+`GET /api/contrato/{contrato_id}/terceirizados` responde sem token, em lista,
+sem paginação nem filtro de data, como os outros sub-recursos. A diferença é
+que **não há medição**: no levantamento de **2026-09-15** a API devolveu `[]`
+nos 6 contratos consultados, e as tentativas de ampliar a amostra em 25 e 26 de
+novembro falharam antes de qualquer resposta — `contratos.comprasnet.gov.br`
+fecha o handshake TLS, recebe a requisição inteira e reseta a conexão sem
+devolver um byte, também em `/` e de duas redes diferentes. Não é DNS, porta
+nem TLS: é o outro lado.
+
+Sem dado observado, a estrutura vem do código-fonte público do Comprasnet
+Contratos (`Contratoterceirizado::terceirizadoAPI`, gitlab.com/comprasnet/
+contratos, `master` em `adb9f9ee`, lido em **2026-11-25**): 19 campos, todos
+planos — `id`, `contrato_id`, `usuario`, `funcao_id`,
+`descricao_complementar`, `jornada`, `unidade`, `salario`, `custo`,
+`escolaridade_id`, `data_inicio`, `data_fim`, `situacao`, `aux_transporte`,
+`vale_alimentacao`, `numero_contrato`, `unidade_gestora`,
+`unidade_gestora_nome` e `fornecedor_identificador`.
+
+Daí as decisões da `contrato_terceirizado_ingest_dag`:
+
+- a chave primária é só `id`, como o catálogo declara, mas aqui é **hipótese**:
+  nenhuma linha foi observada. Vale pelo padrão dos outros sub-recursos, e cai
+  se a API mostrar o contrário;
+- o payload traz `contrato_id`; a DAG compara com o da URL em toda linha e falha
+  antes da escrita se divergirem, como no item, no cronograma e nos arquivos.
+  Registro sem `id` ou com `id` repetido no mesmo lote também interrompe;
+- contrato sem terceirizado (`200 []`) conta como contrato vazio, não grava e
+  não interrompe o bloco — na amostra, foi o caso de todos;
+- os terceirizados de um contrato vão numa escrita só, sem `json_fields`,
+  porque nenhum campo é objeto ou lista;
+- a agenda é sábado 17:00, entre prepostos (16:30) e despesas acessórias
+  (17:30), na ordem das fases da issue #15.
+
+Dado pessoal é o que distingue esta entidade. O catálogo a classifica como
+`pessoal`, e a DAG trata o log como superfície pública: as mensagens citam
+contrato, `id` do registro, posição na lista e contagens, nunca um valor do
+payload, porque o log da task é legível por quem não tem acesso à raw
+(ADR-0020). `test_log_da_ingestao_nao_expoe_dado_pessoal` guarda a regra em vez
+de confiar na convenção.
+
+Particularidades que a Silver precisa tratar, lendo o serializador:
+
+- `usuario` traz **CPF mascarado e nome no mesmo campo** (`***.NNN.NNN-**
+  NOME`). Separar os dois é da Silver, e o CPF já chega parcial da origem: não
+  serve como chave;
+- `fornecedor_identificador` é o CNPJ da empresa, não do trabalhador;
+- `funcao_id` e `escolaridade_id` terminam em `_id` mas carregam **rótulo de
+  texto** (`"Ajudante"`, `"Ensino médio completo"`), não o id da tabela de
+  domínio. Tratar como chave estrangeira daria junção vazia;
+- `salario`, `custo`, `aux_transporte` e `vale_alimentacao` chegam como texto
+  pt-BR (`"1.200,25"`) e seguem assim para a raw: converter é da Silver;
+- o recorte temporal da Silver sai de `data_inicio` e `data_fim`, e `data_fim`
+  é nula enquanto a alocação está aberta;
+- nulo e inteiro no mesmo lote eram achatados pelo `pandas.json_normalize` do
+  `cliente_postgres`, que transformava `jornada` 44 em `44.0` e o nulo no texto
+  `'NaN'`. Corrigido nesta branch (`fix(cliente_postgres)`), com
+  `test_warehouse_preserva_inteiro_e_nulo` cobrindo o caso.
+
+**A DAG é entregue fora do `dag_selector`**, como a issue #30 pede para o caso
+de a entidade continuar vazia. O motivo: ligá-la hoje significaria milhares de
+chamadas semanais para uma entidade sem nenhuma linha observada, gravando dado
+pessoal cuja estrutura ninguém conferiu contra a fonte. O custo de deixar
+desligado é zero, e o de ligar no escuro, não.
+
+A linha do allowlist é uma regex com lookahead
+(`data_ingest/contratos_gov/(?!contrato_terceirizado_ingest_dag\.py)`), e não
+uma lista de arquivos, para que as próximas DAGs da pasta entrem sem editar o
+`dag_selector`. `TestDagSelector`, em
+`tests/unit/test_data_ingest_contratos_gov_dags.py`, fixa as três partes: esta
+DAG fora, as outras dentro, e uma DAG futura dentro.
+
+Para ligar: refazer a medição com
+`uv run python -m scripts.contratos_gov.medir_subrecurso terceirizados --ug
+<codigo> --max 200` (a sugestão da issue é UG grande com contrato de serviço
+com mão de obra); se vier linha, conferir a chave `id` contra o resultado,
+apagar o lookahead e registrar a medição aqui.
+
 ### Sobre o código do MGI: 46000, não 48000
 
 Na API do Contratos.gov.br, o órgão **46000** está presente na lista de órgãos
