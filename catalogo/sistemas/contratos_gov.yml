@@ -238,8 +238,9 @@ entidades:
 
   contrato_responsavel:
     descricao: >-
-      Fiscais e gestores designados para o contrato. A origem entrega nome
-      completo, e-mail e telefone de pessoa física.
+      Fiscais e gestores designados para o contrato, com função, portaria e
+      período de atuação. A origem entrega CPF mascarado e nome completo de
+      pessoa física.
     granularidade: uma linha por responsável designado para um contrato
     dominio: contratacoes
     dag: contrato_responsavel_ingest_dag

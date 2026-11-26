@@ -160,9 +160,9 @@ sources:
       - name: contrato_responsavel
         identifier: raw_contrato_responsavel
         description: >
-            Fiscais e gestores designados para o contrato. A origem entrega nome
-            completo, e-mail e telefone de pessoa física. Granularidade: uma linha por
-            responsável designado para um contrato.
+            Fiscais e gestores designados para o contrato, com função, portaria e
+            período de atuação. A origem entrega CPF mascarado e nome completo de pessoa
+            física. Granularidade: uma linha por responsável designado para um contrato.
         meta:
           classificacao: pessoal
           dag_ingestao: contrato_responsavel_ingest_dag
