@@ -373,4 +373,20 @@ ADR-0019/0020). Fica o dado para quem for fechar a pendência.
 - **Estrutura das entidades da Fase 4.** `contrato_terceirizado`,
   `contrato_despesa_acessoria`, `contrato_ocorrencia` e
   `contrato_domicilio_bancario` vieram vazias em toda a amostra: a chave primária
-  declarada no catálogo para elas é hipótese, a confirmar ao implementar a DAG.
+  declarada no catálogo para elas é hipótese, a confirmar ao implementar a DAG.- **Ordem de entrada dos PRs do épico.** As branches dos sub-recursos saem uma
+  da outra, e não da `main`: a de arquivos carrega empenho, item e cronograma
+  no histórico. Abrir o PR de arquivos contra a `main` agora mostraria ao
+  revisor 25 arquivos e ~3.700 linhas inseridas, das quais só quatro são da
+  issue #27. Enquanto as branches de baixo não entrarem, cada PR precisa ser
+  rebaseado sobre a `main` depois do merge do anterior, na ordem das fases:
+  inativo (#19), empenho (#22), item (#21), cronograma (#24), arquivos (#27).
+  Rebasear antes disso só reescreve commits que já estão em PR aberto de outra
+  pessoa.
+- **Tipos no `cliente_postgres`.** O teste de integração
+  `test_colunas_chegam_como_vieram_da_fonte` falha porque `link_sei` nulo chega
+  ao warehouse como o texto `'NaN'`, efeito do `pandas.json_normalize` em
+  `_flatten_data`. A causa não é a ingestão de anexos, e a correção já existe
+  em `fix/cliente-postgres-tipos`. Ela fica fora da branch de arquivos de
+  propósito: `airflow/plugins/` é do `@GovHub-br/oss` no CODEOWNERS e merece
+  revisão própria, e trazer os commits para cá os duplicaria em dois PRs. O
+  teste passa sem alteração quando aquele PR entrar.
